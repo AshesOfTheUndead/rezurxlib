@@ -386,7 +386,7 @@ local Window = Lib:CreateWindow({
     LoadingEnabled = false,
     Theme = "Ember",
     ToggleUIKeybind = Enum.KeyCode.K,
-    Size = Vector2.new(360, 400),  -- [FIX] mobile-friendly
+    Size = Vector2.new(360, 380),  -- [FIX] shorter height (was 400)
 })
 
 notify = function(title, body, duration, ntype)
@@ -408,26 +408,25 @@ FarmTab:CreateDropdown({
     CurrentOption = "Infinity",
     Callback = function(v) Config.TrainSpeedValue=v end,
 })
--- [FIX] Slider callback debounced — won't fire on every pixel of drag
-local workerDebounced = debounce(function(v)
-    Config.WorkerCount = v
-    if Config.FarmEnabled and Config.FarmMode=="Hybrid" then
-        task.spawn(function()
-            killWorkers()
-            local n=math.max(1,math.min(1000,v*Config.FarmSpeedMul))
-            if Config.TurboActive then n=math.min(1000,n*2) end
-            hybridState.currentWorkers=n
-            spawnWorkers(n)
-        end)
-    end
-end, 0.15)
+-- [FIX] No debounce needed — library slider now only fires callback on click + drag END
 FarmTab:CreateSlider({
     Name = "👥 Workers (1-1000)",
     Range = {1, 1000},
     Increment = 1,
     CurrentValue = 50,
     Suffix = "",
-    Callback = function(v) workerDebounced(v) end,
+    Callback = function(v)
+        Config.WorkerCount = v
+        if Config.FarmEnabled and Config.FarmMode=="Hybrid" then
+            task.spawn(function()
+                killWorkers()
+                local n=math.max(1,math.min(1000,v*Config.FarmSpeedMul))
+                if Config.TurboActive then n=math.min(1000,n*2) end
+                hybridState.currentWorkers=n
+                spawnWorkers(n)
+            end)
+        end
+    end,
 })
 FarmTab:CreateDropdown({
     Name = "⚡ Multiplier",

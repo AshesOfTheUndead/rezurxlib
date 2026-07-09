@@ -1763,25 +1763,29 @@ function Library:CreateWindow(cfg)
 			end
 			function obj:Get() return value end
 
-			local function setFromX(x)
-				local pct = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-				local v = snap(minVal + pct * (maxVal - minVal))
-				if v ~= value then
-					value = v
-					obj.CurrentValue = v
-					update(false)
+				local function setFromX(x)
+					local pct = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+					local v = snap(minVal + pct * (maxVal - minVal))
+					if v ~= value then
+						value = v
+						obj.CurrentValue = v
+						update(false)
+					end
+				end
+				local function fireCallback()
 					if callback then pcall(callback, value) end
 				end
-			end
-			track.InputBegan:Connect(function(inp)
-				if inp.UserInputType == Enum.UserInputType.MouseButton1
-					or inp.UserInputType == Enum.UserInputType.Touch then
-					Tween(knob, T10, { Size = UDim2.new(0, 20, 0, 20) })
-					setFromX(inp.Position.X)
-					registerDrag(track, function(pos) setFromX(pos.X) end, function()
-						Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
-					end)
-				end
+				track.InputBegan:Connect(function(inp)
+					if inp.UserInputType == Enum.UserInputType.MouseButton1
+						or inp.UserInputType == Enum.UserInputType.Touch then
+						Tween(knob, T10, { Size = UDim2.new(0, 20, 0, 20) })
+						setFromX(inp.Position.X)
+						fireCallback()
+						registerDrag(track, function(pos) setFromX(pos.X) end, function()
+							Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
+							fireCallback()
+						end)
+					end
 			end)
 			onTheme(function()
 				Tween(holder, T20, { BackgroundColor3 = C.panel })

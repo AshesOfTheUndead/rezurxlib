@@ -1035,35 +1035,14 @@ function Library:CreateWindow(cfg)
 	end
 
 	-- ------------------------------------------------------------
+	-- ------------------------------------------------------------
 	-- HIDE / SHOW / MINIMIZE / TOGGLE KEYBIND
 	-- ------------------------------------------------------------
 	local hidden = false
 	local function setHidden(h)
 		hidden = h
-		if hidden then
-			local outT = Tween(frame, T20, { Position = frame.Position + UDim2.new(0, 0, 0, 14) })
-			Tween(frame, T20, { BackgroundTransparency = 1 })
-			Tween(shadow, T20, { BackgroundTransparency = 1 })
-			task.delay(0.2, function()
-				if hidden then
-					frame.Visible = false
-					shadow.Visible = false
-					frame.Position = frame.Position - UDim2.new(0, 0, 0, 14)
-					frame.BackgroundTransparency = 0
-					shadow.BackgroundTransparency = 0.52
-				end
-			end)
-			if outT then end
-		else
-			frame.Visible = true
-			shadow.Visible = true
-			local from = frame.Position + UDim2.new(0, 0, 0, 14)
-			frame.Position = from
-			frame.BackgroundTransparency = 1
-			shadow.BackgroundTransparency = 1
-			Tween(frame, TPOP, { Position = from - UDim2.new(0, 0, 0, 14), BackgroundTransparency = 0 })
-			Tween(shadow, T20, { BackgroundTransparency = 0.52 })
-		end
+		frame.Visible = not h
+		shadow.Visible = not h
 	end
 	closeBtn.MouseButton1Click:Connect(function()
 		closeCurrentPopup()
@@ -1077,47 +1056,6 @@ function Library:CreateWindow(cfg)
 		end
 	end))
 
-	local BODY_H_FULL = WIN_H - HEADER_H
-	local minimized, minimizing = false, false
-	minBtn.MouseButton1Click:Connect(function()
-		if minimizing then return end
-		minimizing = true
-		minimized = not minimized
-		closeCurrentPopup()
-		Tween(minBtn, T10, { Size = UDim2.new(0, 26, 0, 24) })
-		task.delay(0.1, function()
-			Tween(minBtn, T10, { Size = UDim2.new(0, 30, 0, 28) })
-		end)
-		if minimized then
-			tabBar.Visible = false
-			content.Visible = false
-			statusBar.Visible = false
-			local resizeFrame = Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, HEADER_H) })
-			Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, 0) })
-			Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 36, 0, HEADER_H + 36) })
-			Tween(minGlyph, T20, { Rotation = 180 })
-			if resizeFrame then
-				resizeFrame.Completed:Connect(function() minimizing = false end)
-			else
-				minimizing = false
-			end
-		else
-			tabBar.Visible = true
-			content.Visible = true
-			statusBar.Visible = true
-			local resizeFrame = Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
-			Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, BODY_H_FULL) })
-			Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36) })
-			Tween(minGlyph, T20, { Rotation = 0 })
-			if resizeFrame then
-				resizeFrame.Completed:Connect(function() minimizing = false end)
-			else
-				minimizing = false
-			end
-		end
-	end)
-
-	-- ------------------------------------------------------------
 	-- LOADING OVERLAY — contained inside `body` (never full-screen),
 	-- pcall-wrapped, hard watchdog. Header stays live from frame one.
 	-- ------------------------------------------------------------
@@ -1273,7 +1211,7 @@ function Library:CreateWindow(cfg)
 
 		local textLbl = Instance.new("TextLabel")
 		textLbl.Size = UDim2.new(0, 0, 1, 0)
-		textLbl.AutomaticSize = Enum.AutomaticSize.X
+		textLbl.AutomaticSize = Enum.AutomaticSize.None
 		textLbl.BackgroundTransparency = 1
 		textLbl.Font = Enum.Font.GothamBold
 		textLbl.TextSize = 12

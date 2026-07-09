@@ -739,7 +739,7 @@ function Library:CreateWindow(cfg)
         dragBar.Selectable = false
         dragBar.Parent = header
 
-        dragBar.InputBegan:Connect(function(inp)
+        WindowJanitor:Add(dragBar.InputBegan:Connect(function(inp)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1
                         or inp.UserInputType == Enum.UserInputType.Touch then
                         local dragStart = inp.Position
@@ -756,7 +756,7 @@ function Library:CreateWindow(cfg)
                                 Tween(shadow, T15, { BackgroundTransparency = 0.52 })
                         end)
                 end
-        end)
+        end))
 
 	-- ------------------------------------------------------------
 	-- TAB BAR + SLIDING INDICATOR
@@ -2452,22 +2452,24 @@ function Library:CreateWindow(cfg)
 			return obj
 		end
 
-		-- Lowercase short-form aliases (matches the old panel style),
-		-- so existing panel code keeps working during migration.
-		tab.Label = function(_, text) return tab:CreateSection(text) end
-		tab.Divider = function(_, text) return tab:CreateDivider(text) end
-		tab.Button = function(_, n, cb) return tab:CreateButton({ Name = n, Callback = cb }) end
-		tab.Toggle = function(_, n, d, cb) return tab:CreateToggle({ Name = n, CurrentValue = d, Callback = cb }) end
-		tab.Slider = function(_, n, mn, mx, d, sfx, cb)
-			return tab:CreateSlider({ Name = n, Range = { mn, mx }, CurrentValue = d, Suffix = sfx, Callback = cb })
-		end
-		tab.Input = function(_, n, ph, cb) return tab:CreateInput({ Name = n, PlaceholderText = ph, Callback = cb }) end
-		tab.Dropdown = function(_, n, opts, d, cb)
-			return tab:CreateDropdown({ Name = n, Options = opts, CurrentOption = d, Callback = cb })
-		end
-		tab.ColorPicker = function(_, n, d, cb) return tab:CreateColorPicker({ Name = n, Color = d, Callback = cb }) end
-		tab.Paragraph = function(_, t, c) return tab:CreateParagraph({ Title = t, Content = c }) end
-		tab.Keybind = function(_, n, k, cb) return tab:CreateKeybind({ Name = n, CurrentKeybind = k, Callback = cb }) end
+		-- Short-form aliases stored in a separate table to avoid
+		-- overwriting the CreateXxx methods on the tab object itself.
+		tab.aliases = {
+			Label = function(_, text) return tab:CreateSection(text) end,
+			Divider = function(_, text) return tab:CreateDivider(text) end,
+			Button = function(_, n, cb) return tab:CreateButton({ Name = n, Callback = cb }) end,
+			Toggle = function(_, n, d, cb) return tab:CreateToggle({ Name = n, CurrentValue = d, Callback = cb }) end,
+			Slider = function(_, n, mn, mx, d, sfx, cb)
+				return tab:CreateSlider({ Name = n, Range = { mn, mx }, CurrentValue = d, Suffix = sfx, Callback = cb })
+			end,
+			Input = function(_, n, ph, cb) return tab:CreateInput({ Name = n, PlaceholderText = ph, Callback = cb }) end,
+			Dropdown = function(_, n, opts, d, cb)
+				return tab:CreateDropdown({ Name = n, Options = opts, CurrentOption = d, Callback = cb })
+			end,
+			ColorPicker = function(_, n, d, cb) return tab:CreateColorPicker({ Name = n, Color = d, Callback = cb }) end,
+			Paragraph = function(_, t, c) return tab:CreateParagraph({ Title = t, Content = c }) end,
+			Keybind = function(_, n, k, cb) return tab:CreateKeybind({ Name = n, CurrentKeybind = k, Callback = cb }) end,
+		}
 
 		return tab
 	end
@@ -2477,6 +2479,7 @@ function Library:CreateWindow(cfg)
 	-- ------------------------------------------------------------
 	function Window:Destroy()
 		closeCurrentPopup()
+		table.clear(DragHandlers)  -- clear stale drag handlers
 		WindowJanitor:Cleanup()
 	end
 

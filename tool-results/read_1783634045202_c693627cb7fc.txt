@@ -1,0 +1,587 @@
+     1→     1→-- ============================================================
+     2→     2→-- 👑 DOMINUS V8 — Powered by RezurXLib
+     3→     3→-- by RezurXshin | Creator of RezurXLabs
+     4→     4→--
+     5→     5→-- Uses the user's own RezurXLib UI framework:
+     6→     6→-- https://github.com/AshesOfTheUndead/rayfield-ui-clone
+     7→     7→--
+     8→     8→-- 1000 max workers · math.huge · PVP Off default ON · no anti-cheat
+     9→     9→--
+    10→    10→-- [V8 FIXES]:
+    11→    11→--   • All engine callbacks wrapped in task.spawn (no UI freeze)
+    12→    12→--   • Slider callbacks debounced (won't fire 1000x during drag)
+    13→    13→--   • Window 360x400 (mobile-friendly)
+    14→    14→--   • Default workers 50 (was 100 — 1000-thread spawn on every
+    15→    15→--     slider tick was the freeze cause)
+    16→    16→-- ============================================================
+    17→    17→
+    18→    18→-- ═══ Load RezurXLib from GitHub ═══
+    19→    19→local Lib
+    20→    20→local LIB_URL = "https://raw.githubusercontent.com/AshesOfTheUndead/rayfield-ui-clone/main/RezurXLib.lua"
+    21→    21→local ok, src = pcall(function() return game:HttpGet(LIB_URL) end)
+    22→    22→if ok and src and #src > 100 then
+    23→    23→    src = src:gsub("self%._n %+= 1", "self._n = self._n + 1")
+    24→    24→    local fn, err = loadstring(src)
+    25→    25→    if fn then Lib = fn() end
+    26→    26→end
+    27→    27→if not Lib then
+    28→    28→    pcall(function()
+    29→    29→        game:GetService("StarterGui"):SetCore("SendNotification", {
+    30→    30→            Title = "DOMINUS V8 Error",
+    31→    31→            Text = "Failed to load RezurXLib. Check internet or executor.",
+    32→    32→            Duration = 10,
+    33→    33→        })
+    34→    34→    end)
+    35→    35→    return
+    36→    36→end
+    37→    37→
+    38→    38→-- ═══ SERVICES ═══
+    39→    39→local Players           = game:GetService("Players")
+    40→    40→local UserInputService  = game:GetService("UserInputService")
+    41→    41→local RunService        = game:GetService("RunService")
+    42→    42→local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    43→    43→local VirtualUser       = game:GetService("VirtualUser")
+    44→    44→local HttpService       = game:GetService("HttpService")
+    45→    45→local player            = Players.LocalPlayer
+    46→    46→local unpack = unpack or table.unpack
+    47→    47→
+    48→    48→-- ═══ HELPERS ═══
+    49→    49→local function formatNumber(n)
+    50→    50→    local s = {{1e33,"De"},{1e30,"No"},{1e27,"Oc"},{1e24,"Sp"},{1e21,"Sx"},{1e18,"Qi"},{1e15,"Qa"},{1e12,"T"},{1e9,"B"},{1e6,"M"},{1e3,"K"}}
+    51→    51→    for _, v in ipairs(s) do if n >= v[1] then return string.format("%.2f%s", n / v[1], v[2]) end end
+    52→    52→    return tostring(n)
+    53→    53→end
+    54→    54→
+    55→    55→local function escapeRich(s)
+    56→    56→    s = tostring(s or "")
+    57→    57→    return s:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+    58→    58→end
+    59→    59→
+    60→    60→local function safeCall(src, fn, ...)
+    61→    61→    local ok, err = pcall(fn, ...)
+    62→    62→    if not ok then warn("[DOMINUS]", src, err) end
+    63→    63→    return ok, err
+    64→    64→end
+    65→    65→
+    66→    66→-- [FIX] Debounce helper — prevents callback from firing too rapidly (slider drag)
+    67→    67→local function debounce(fn, delay)
+    68→    68→    local lastCall = 0
+    69→    69→    local lastVal = nil
+    70→    70→    local pending = false
+    71→    71→    return function(...)
+    72→    72→        local args = {...}
+    73→    73→        local now = tick()
+    74→    74→        if now - lastCall >= (delay or 0.1) then
+    75→    75→            lastCall = now
+    76→    76→            fn(unpack(args))
+    77→    77→        end
+    78→    78→    end
+    79→    79→end
+    80→    80→
+    81→    81→-- ═══ FORWARD DECLARATIONS ═══
+    82→    82→local notify, applyMovement, restoreMovement, executePump, sendChatMessage
+    83→    83→local initAllRemotes, healRemotesWithBackoff, setTurbo, startFarm, stopFarm
+    84→    84→local startOvernight, stopOvernight, setNoclipMode, powerTracker
+    85→    85→
+    86→    86→-- ═══ CONFIG ═══
+    87→    87→local Config = {
+    88→    88→    CustomTag="", UserName="",
+    89→    89→    TagColor=Color3.fromRGB(128,0,0), UserColor=Color3.fromRGB(255,255,255), MessageColor=Color3.fromRGB(255,255,255),
+    90→    90→    FarmMode="Hybrid", FarmEnabled=false, FarmSpeedMul=1,
+    91→    91→    WorkerCount=50, MaxPerformance=false, TrainSpeedValue="Infinity",
+    92→    92→    OvernightEnabled=false,
+    93→    93→    OverrideStats=false, WalkSpeed=16, JumpPower=50,
+    94→    94→    NoclipEnabled=false, NoclipMode="Improved",
+    95→    95→    PvpOff=true, EspEnabled=false,
+    96→    96→    AntiAfk=true, AntiDetect=false,
+    97→    97→    TurboActive=false, TurboUntil=0, TurboCooldownUntil=0,
+    98→    98→}
+    99→    99→local hybridState = {currentWorkers=5, lastAdjust=0, fpsHistory={}, responseTimes={}, consecutiveFailures=0, emergencyMode=false}
+   100→   100→
+   101→   101→-- ═══ REMOTE MANAGER ═══
+   102→   102→local Remotes = {}
+   103→   103→local remoteMutex = false
+   104→   104→local consecutiveHealFailures = 0
+   105→   105→local lastHealTime = 0
+   106→   106→initAllRemotes = function()
+   107→   107→    if remoteMutex then return end
+   108→   108→    remoteMutex = true
+   109→   109→    pcall(function()
+   110→   110→        local tsRoot=ReplicatedStorage:FindFirstChild("TrainSystem") local tsRem=tsRoot and tsRoot:FindFirstChild("Remote")
+   111→   111→        if tsRem then Remotes.ApplyAddFrenzyValue=tsRem:FindFirstChild("ApplyAddFrenzyValue") Remotes.TrainSpeedHasChanged=tsRem:FindFirstChild("TrainSpeedHasChanged") end
+   112→   112→        local teRoot=ReplicatedStorage:FindFirstChild("TrainEquipment") local teRem=teRoot and teRoot:FindFirstChild("Remote")
+   113→   113→        if teRem then Remotes.ApplyMobileTrain=teRem:FindFirstChild("ApplyMobileTrain") Remotes.ApplyStationaryTrain=teRem:FindFirstChild("ApplyStationaryTrain") end
+   114→   114→        local tc=ReplicatedStorage:FindFirstChild("TextChat") local tcRem=tc and tc:FindFirstChild("Remote")
+   115→   115→        if tcRem then Remotes.SendTextChatMessage=tcRem:FindFirstChild("SendTextChatMessageToAllPlayer") end
+   116→   116→        local ab=ReplicatedStorage:FindFirstChild("Ability") local abRem=ab and ab:FindFirstChild("Remote")
+   117→   117→        if abRem then Remotes.ApplyCastAbility=abRem:FindFirstChild("ApplyCastAbility") end
+   118→   118→        local ar=ReplicatedStorage:FindFirstChild("Area") local arRem=ar and ar:FindFirstChild("Remote")
+   119→   119→        if arRem then Remotes.PlayerAreaIn=arRem:FindFirstChild("PlayerAreaIn") end
+   120→   120→    end)
+   121→   121→    remoteMutex = false
+   122→   122→end
+   123→   123→initAllRemotes()
+   124→   124→healRemotesWithBackoff = function()
+   125→   125→    local now = tick() local backoff = math.min(30, 2^consecutiveHealFailures)
+   126→   126→    if now - lastHealTime < backoff then return end
+   127→   127→    lastHealTime = now initAllRemotes()
+   128→   128→    if Remotes.ApplyAddFrenzyValue then consecutiveHealFailures=0 else consecutiveHealFailures=consecutiveHealFailures+1 end
+   129→   129→end
+   130→   130→task.spawn(function() while task.wait(30) do safeCall("init", initAllRemotes) end end)
+   131→   131→
+   132→   132→-- ═══ POWER TRACKER ═══
+   133→   133→powerTracker = {sessionStart=0, sessionStartPower=0, lastTickTime=0, lastTickPower=0, gainsPerSec=0, gainsThisSession=0, samples={}}
+   134→   134→function powerTracker.readPower()
+   135→   135→    local cfg=player:FindFirstChild("Configuration") local ts=cfg and cfg:FindFirstChild("TrainSystem")
+   136→   136→    if not ts then return 0 end local t=0 for i=1,4 do t=t+(ts:GetAttribute(tostring(i)) or 0) end return t
+   137→   137→end
+   138→   138→function powerTracker.startSession()
+   139→   139→    powerTracker.sessionStart=tick() powerTracker.sessionStartPower=powerTracker.readPower()
+   140→   140→    powerTracker.lastTickTime=tick() powerTracker.lastTickPower=powerTracker.sessionStartPower
+   141→   141→    powerTracker.gainsThisSession=0 powerTracker.samples={}
+   142→   142→end
+   143→   143→function powerTracker.tick()
+   144→   144→    local now=tick() local p=powerTracker.readPower() local dt=now-powerTracker.lastTickTime
+   145→   145→    if dt>0 then local d=p-powerTracker.lastTickPower powerTracker.gainsPerSec=d/dt
+   146→   146→    powerTracker.gainsThisSession=powerTracker.gainsThisSession+d
+   147→   147→    table.insert(powerTracker.samples, powerTracker.gainsPerSec)
+   148→   148→    if #powerTracker.samples>10 then table.remove(powerTracker.samples,1) end end
+   149→   149→    powerTracker.lastTickTime=now powerTracker.lastTickPower=p return p
+   150→   150→end
+   151→   151→function powerTracker.avgGainsPerSec()
+   152→   152→    local s=0 for _,v in ipairs(powerTracker.samples) do s=s+v end
+   153→   153→    return #powerTracker.samples>0 and (s/#powerTracker.samples) or 0
+   154→   154→end
+   155→   155→function powerTracker.trend()
+   156→   156→    if #powerTracker.samples<4 then return "flat" end
+   157→   157→    local r,o=0,0 local h=math.floor(#powerTracker.samples/2)
+   158→   158→    for i=1,h do o=o+powerTracker.samples[i] end for i=h+1,#powerTracker.samples do r=r+powerTracker.samples[i] end
+   159→   159→    o=o/h r=r/(#powerTracker.samples-h)
+   160→   160→    if r>o*1.15 then return "up" end if r<o*0.85 then return "down" end return "flat"
+   161→   161→end
+   162→   162→
+   163→   163→-- ═══ FARM ENGINE ═══
+   164→   164→local function getTrainSpeed()
+   165→   165→    local v=Config.TrainSpeedValue
+   166→   166→    if v=="1e9" then return 1e9 elseif v=="1e15" then return 1e15 else return math.huge end
+   167→   167→end
+   168→   168→executePump = function(speed)
+   169→   169→    if not Remotes.ApplyAddFrenzyValue then healRemotesWithBackoff() end
+   170→   170→    if not Remotes.ApplyAddFrenzyValue then return end
+   171→   171→    local r=Remotes
+   172→   172→    local calls={
+   173→   173→        {f="I",r=r.ApplyAddFrenzyValue,a={10000}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+   174→   174→        {f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
+   175→   175→        {f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+   176→   176→        {f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
+   177→   177→        {f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+   178→   178→        {f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
+   179→   179→        {f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+   180→   180→        {f="I",r=r.ApplyAddFrenzyValue,a={10000}},
+   181→   181→    }
+   182→   182→    for _,c in ipairs(calls) do
+   183→   183→        if c.r then
+   184→   184→            if c.f=="I" then pcall(c.r.InvokeServer, c.r, unpack(c.a))
+   185→   185→            else pcall(c.r.FireServer, c.r, unpack(c.a)) end
+   186→   186→        end
+   187→   187→    end
+   188→   188→end
+   189→   189→
+   190→   190→local workerGeneration=0 local activeWorkers=0
+   191→   191→local function spawnWorkers(n)
+   192→   192→    workerGeneration=workerGeneration+1 local gen=workerGeneration activeWorkers=n
+   193→   193→    for i=1,n do local wid=i
+   194→   194→        task.spawn(function()
+   195→   195→            task.wait((wid-1)*0.002)
+   196→   196→            while gen==workerGeneration and Config.FarmEnabled do
+   197→   197→                local sp=getTrainSpeed() if hybridState.emergencyMode then sp=1e9 end
+   198→   198→                pcall(executePump, sp) task.wait(0.001)
+   199→   199→            end
+   200→   200→        end)
+   201→   201→    end
+   202→   202→end
+   203→   203→local function killWorkers() workerGeneration=workerGeneration+1 activeWorkers=0 end
+   204→   204→
+   205→   205→local adaptiveConn=nil
+   206→   206→local function startAdaptiveThrottle()
+   207→   207→    if adaptiveConn then adaptiveConn:Disconnect() end
+   208→   208→    adaptiveConn=RunService.Heartbeat:Connect(function()
+   209→   209→        local now=tick() if now-hybridState.lastAdjust<2 then return end
+   210→   210→        hybridState.lastAdjust=now
+   211→   211→        local fc=0 local c2=RunService.Heartbeat:Connect(function() fc=fc+1 end) task.wait(0.5) c2:Disconnect()
+   212→   212→        local fps=math.floor(fc/0.5)
+   213→   213→        table.insert(hybridState.fpsHistory,fps) if #hybridState.fpsHistory>5 then table.remove(hybridState.fpsHistory,1) end
+   214→   214→        local af=0 for _,v in ipairs(hybridState.fpsHistory) do af=af+v end af=af/#hybridState.fpsHistory
+   215→   215→        local tr=powerTracker.trend() local old=hybridState.currentWorkers
+   216→   216→        if af<15 then hybridState.emergencyMode=true hybridState.currentWorkers=1
+   217→   217→        elseif af<25 then hybridState.emergencyMode=false hybridState.currentWorkers=math.max(1,hybridState.currentWorkers-1)
+   218→   218→        elseif tr=="down" and hybridState.currentWorkers>2 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers-1
+   219→   219→        elseif tr=="up" and af>50 and hybridState.currentWorkers<1000 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers+1
+   220→   220→        elseif tr=="flat" and af>50 and hybridState.currentWorkers<500 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers+1
+   221→   221→        end
+   222→   222→        if hybridState.currentWorkers~=old and Config.FarmEnabled and Config.FarmMode=="Hybrid" then
+   223→   223→            killWorkers() task.wait(0.05) spawnWorkers(hybridState.currentWorkers)
+   224→   224→        end
+   225→   225→    end)
+   226→   226→end
+   227→   227→local function stopAdaptiveThrottle() if adaptiveConn then adaptiveConn:Disconnect() adaptiveConn=nil end end
+   228→   228→
+   229→   229→local farmConn=nil
+   230→   230→startFarm = function()
+   231→   231→    if farmConn then farmConn:Disconnect() farmConn=nil end
+   232→   232→    stopAdaptiveThrottle() powerTracker.startSession()
+   233→   233→    if Config.FarmMode=="Hybrid" then
+   234→   234→        hybridState.currentWorkers=math.max(1,math.min(1000,Config.WorkerCount*Config.FarmSpeedMul))
+   235→   235→        if Config.TurboActive then hybridState.currentWorkers=math.min(1000,hybridState.currentWorkers*2) end
+   236→   236→        hybridState.emergencyMode=false hybridState.fpsHistory={}
+   237→   237→        spawnWorkers(hybridState.currentWorkers) startAdaptiveThrottle()
+   238→   238→    else
+   239→   239→        farmConn=RunService.Heartbeat:Connect(function() safeCall("farm",function() pcall(executePump,getTrainSpeed()) end) end)
+   240→   240→    end
+   241→   241→end
+   242→   242→stopFarm = function()
+   243→   243→    if farmConn then farmConn:Disconnect() farmConn=nil end
+   244→   244→    stopAdaptiveThrottle() killWorkers()
+   245→   245→end
+   246→   246→
+   247→   247→-- ═══ OVERNIGHT ═══
+   248→   248→local overnightConn=nil local overnightOrig={}
+   249→   249→startOvernight = function()
+   250→   250→    if overnightConn then return end
+   251→   251→    overnightOrig={Config.FarmMode,Config.WorkerCount,Config.AntiDetect,Config.TrainSpeedValue}
+   252→   252→    Config.FarmMode="Hybrid" Config.WorkerCount=3 Config.AntiDetect=true Config.TrainSpeedValue="Infinity"
+   253→   253→    Config.TurboActive=false Config.TurboUntil=0 Config.FarmEnabled=true startFarm()
+   254→   254→    local cs=tick() local lfc=tick() local fls=0
+   255→   255→    overnightConn=RunService.Heartbeat:Connect(function()
+   256→   256→        local now=tick()
+   257→   257→        if now-lfc>=5 then lfc=now local fc=0 local c2=RunService.Heartbeat:Connect(function() fc=fc+1 end) task.wait(0.5) c2:Disconnect()
+   258→   258→        local fps=math.floor(fc/0.5)
+   259→   259→        if fps<15 then fls=fls+1 if fls>=2 then killWorkers() task.delay(120,function() if Config.OvernightEnabled then cs=tick() spawnWorkers(3) end end) end
+   260→   260→        else fls=0 end end
+   261→   261→        if now-cs>=300 then killWorkers() collectgarbage("collect") task.delay(30,function() if Config.OvernightEnabled then cs=tick() spawnWorkers(3) end end) end
+   262→   262→    end)
+   263→   263→end
+   264→   264→stopOvernight = function()
+   265→   265→    if overnightConn then overnightConn:Disconnect() overnightConn=nil end
+   266→   266→    Config.FarmMode=overnightOrig[1] or "Hybrid" Config.WorkerCount=overnightOrig[2] or 50
+   267→   267→    Config.AntiDetect=overnightOrig[3]~=nil and overnightOrig[3] or false Config.TrainSpeedValue=overnightOrig[4] or "Infinity"
+   268→   268→    Config.TurboActive=false Config.FarmEnabled=false stopFarm()
+   269→   269→end
+   270→   270→
+   271→   271→-- ═══ TURBO + CHAT + MOVEMENT + NOCLIP + ESP + CORE ═══
+   272→   272→setTurbo = function()
+   273→   273→    if Config.OvernightEnabled then return end
+   274→   274→    local now=tick() if Config.TurboActive then return end if now<Config.TurboCooldownUntil then return end
+   275→   275→    Config.TurboActive=true Config.TurboUntil=now+10
+   276→   276→    notify("🚀 TURBO", "2x for 10s!", 3, "success")
+   277→   277→    if Config.FarmMode=="Hybrid" and Config.FarmEnabled then task.spawn(function() killWorkers() task.wait(0.05) spawnWorkers(math.min(1000,hybridState.currentWorkers*2)) end) end
+   278→   278→    task.spawn(function()
+   279→   279→        while Config.TurboActive and tick()<Config.TurboUntil do task.wait(0.5) end
+   280→   280→        Config.TurboActive=false Config.TurboCooldownUntil=tick()+5
+   281→   281→        if Config.FarmMode=="Hybrid" and Config.FarmEnabled then task.spawn(function() killWorkers() task.wait(0.05) spawnWorkers(hybridState.currentWorkers) end) end
+   282→   282→    end)
+   283→   283→end
+   284→   284→
+   285→   285→local function buildChatMessage(msg)
+   286→   286→    local tag,name="",""
+   287→   287→    if Config.CustomTag~="" then tag=string.format('<font color="#%s"><b>[%s]</b></font> ',Config.TagColor:ToHex(),escapeRich(Config.CustomTag)) end
+   288→   288→    if Config.UserName~="" then name=string.format('<font color="#%s"><b>%s:</b></font> ',Config.UserColor:ToHex(),escapeRich(Config.UserName)) end
+   289→   289→    return tag..name..string.format('<font color="#%s"><b>%s</b></font>',Config.MessageColor:ToHex(),escapeRich(msg))
+   290→   290→end
+   291→   291→sendChatMessage = function(msg)
+   292→   292→    if not Remotes.SendTextChatMessage then healRemotesWithBackoff() end
+   293→   293→    if not Remotes.SendTextChatMessage or not msg or msg=="" then return end
+   294→   294→    local full=buildChatMessage(msg)
+   295→   295→    local ok=pcall(function() Remotes.SendTextChatMessage:InvokeServer({Text=full}) end)
+   296→   296→    if not ok then safeCall("chat",function() Remotes.SendTextChatMessage:InvokeServer(full) end) end
+   297→   297→end
+   298→   298→
+   299→   299→applyMovement = function()
+   300→   300→    if not Config.OverrideStats then return end
+   301→   301→    local ch=player.Character if not ch then return end
+   302→   302→    local h=ch:FindFirstChildOfClass("Humanoid") if not h then return end
+   303→   303→    h.WalkSpeed=Config.WalkSpeed h.JumpPower=Config.JumpPower h.UseJumpPower=true
+   304→   304→end
+   305→   305→restoreMovement = function()
+   306→   306→    local ch=player.Character local h=ch and ch:FindFirstChildOfClass("Humanoid")
+   307→   307→    if h then h.WalkSpeed=16 h.JumpPower=50 end
+   308→   308→end
+   309→   309→
+   310→   310→local noclipConn,noclipCharConn=nil,nil
+   311→   311→setNoclipMode = function(en)
+   312→   312→    Config.NoclipEnabled=en
+   313→   313→    if noclipConn then noclipConn:Disconnect() noclipConn=nil end
+   314→   314→    if noclipCharConn then noclipCharConn:Disconnect() noclipCharConn=nil end
+   315→   315→    if not en then return end
+   316→   316→    local function start()
+   317→   317→        if Config.NoclipMode=="V777" then
+   318→   318→            noclipConn=RunService.Stepped:Connect(function()
+   319→   319→                local ch=player.Character if ch then for _,v in pairs(ch:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide=false end end end
+   320→   320→            end)
+   321→   321→        else
+   322→   322→            noclipConn=RunService.Stepped:Connect(function()
+   323→   323→                local ch=player.Character if not ch then return end
+   324→   324→                for _,v in ipairs(ch:GetDescendants()) do if v:IsA("BasePart") and v.CanCollide and v.Name~="HumanoidRootPart" then v.CanCollide=false end end
+   325→   325→            end)
+   326→   326→        end
+   327→   327→    end
+   328→   328→    start()
+   329→   329→    noclipCharConn=player.CharacterAdded:Connect(function() task.wait(0.3) if Config.NoclipEnabled then if noclipConn then noclipConn:Disconnect() noclipConn=nil end start() end end)
+   330→   330→end
+   331→   331→
+   332→   332→local espCache,espConn={},nil
+   333→   333→local function clearEsp() if espConn then espConn:Disconnect() espConn=nil end for h,e in pairs(espCache) do if e.gui and e.gui.Parent then e.gui:Destroy() end end table.clear(espCache) end
+   334→   334→local function getPowerFor(name)
+   335→   335→    local p=Players:FindFirstChild(name) if not p then return 0 end
+   336→   336→    local cfg=p:FindFirstChild("Configuration") local ts=cfg and cfg:FindFirstChild("TrainSystem") if not ts then return 0 end
+   337→   337→    local t=0 for i=1,4 do t=t+(ts:GetAttribute(tostring(i)) or 0) end return t
+   338→   338→end
+   339→   339→
+   340→   340→RunService.Heartbeat:Connect(function()
+   341→   341→    if not Config.OverrideStats then return end
+   342→   342→    local ch=player.Character if not ch then return end
+   343→   343→    local h=ch:FindFirstChildOfClass("Humanoid") if not h then return end
+   344→   344→    if h.WalkSpeed~=Config.WalkSpeed or h.JumpPower~=Config.JumpPower then h.WalkSpeed=Config.WalkSpeed h.JumpPower=Config.JumpPower h.UseJumpPower=true end
+   345→   345→end)
+   346→   346→player.CharacterAdded:Connect(function(char)
+   347→   347→    local h=char:WaitForChild("Humanoid",5)
+   348→   348→    if h then
+   349→   349→        h.Died:Connect(function() if Config.FarmEnabled and Config.FarmMode=="Hybrid" then killWorkers() end end)
+   350→   350→        if Config.OverrideStats then task.wait(0.2) applyMovement() end
+   351→   351→        if Config.FarmEnabled and Config.FarmMode=="Hybrid" then task.wait(0.5) if Config.FarmEnabled then spawnWorkers(math.max(1,math.min(1000,hybridState.currentWorkers))) end end
+   352→   352→    end
+   353→   353→end)
+   354→   354→player.Idled:Connect(function()
+   355→   355→    if not Config.AntiAfk then return end
+   356→   356→    safeCall("afk",function() VirtualUser:CaptureController() VirtualUser:ClickButton2(Vector2.new()) end)
+   357→   357→end)
+   358→   358→task.spawn(function()
+   359→   359→    while task.wait(0.2) do
+   360→   360→        if Config.PvpOff then
+   361→   361→            safeCall("pvp",function()
+   362→   362→                local ar=workspace:FindFirstChild("Area") local pa=ar and ar:FindFirstChild("PlayerArea") local s2=pa and pa:FindFirstChild("S2")
+   363→   363→                if s2 and Remotes.PlayerAreaIn then Remotes.PlayerAreaIn:InvokeServer(s2) end
+   364→   364→                if Remotes.PlayerAreaIn then
+   365→   365→                    for _,child in ipairs(workspace:GetChildren()) do
+   366→   366→                        if child.Name=="Area" then
+   367→   367→                            for _,sub in ipairs(child:GetDescendants()) do
+   368→   368→                                if sub.Name:lower():find("safe") or sub.Name:lower():find("s2") or sub.Name:lower():find("no") then
+   369→   369→                                    pcall(function() Remotes.PlayerAreaIn:InvokeServer(sub) end)
+   370→   370→                                end
+   371→   371→                            end
+   372→   372→                        end
+   373→   373→                    end
+   374→   374→                end
+   375→   375→                if not Remotes.PlayerAreaIn then healRemotesWithBackoff() end
+   376→   376→            end)
+   377→   377→        end
+   378→   378→    end
+   379→   379→end)
+   380→   380→
+   381→   381→-- ═══ CREATE WINDOW ═══
+   382→   382→local Window = Lib:CreateWindow({
+   383→   383→    Name = "👑 DOMINUS V8",
+   384→   384→    Subtitle = "🔥 Maximum Power · RezurXLab",
+   385→   385→    LoadingTitle = "👑 DOMINUS V8",
+   386→   386→    LoadingEnabled = false,
+   387→   387→    Theme = "Ember",
+   388→   388→    ToggleUIKeybind = Enum.KeyCode.K,
+   389→   389→    Size = Vector2.new(360, 360),  -- [FIX] shorter for mobile
+   390→   390→})
+   391→   391→
+   392→   392→notify = function(title, body, duration, ntype)
+   393→   393→    Window:Notify({Title = title or "DOMINUS", Content = body or "", Duration = duration or 5, Type = ntype or "info"})
+   394→   394→end
+   395→   395→
+   396→   396→-- ═══ TAB: Farm ═══
+   397→   397→local FarmTab = Window:CreateTab("Farm", "💪")
+   398→   398→FarmTab:CreateSection("🔥 MODE & SPEED")
+   399→   399→FarmTab:CreateDropdown({
+   400→   400→    Name = "⚡ Mode",
+   401→   401→    Options = {"Hybrid", "Legacy"},
+   402→   402→    CurrentOption = "Hybrid",
+   403→   403→    Callback = function(v) Config.FarmMode=v if Config.FarmEnabled then task.spawn(function() stopFarm() task.wait(0.1) startFarm() end) end end,
+   404→   404→})
+   405→   405→FarmTab:CreateDropdown({
+   406→   406→    Name = "🚀 Speed",
+   407→   407→    Options = {"Infinity", "1e9", "1e15"},
+   408→   408→    CurrentOption = "Infinity",
+   409→   409→    Callback = function(v) Config.TrainSpeedValue=v end,
+   410→   410→})
+   411→   411→-- [FIX] No debounce needed — library slider now only fires callback on click + drag END
+   412→   412→FarmTab:CreateSlider({
+   413→   413→    Name = "👥 Workers (1-1000)",
+   414→   414→    Range = {1, 1000},
+   415→   415→    Increment = 1,
+   416→   416→    CurrentValue = 50,
+   417→   417→    Suffix = "",
+   418→   418→    Callback = function(v)
+   419→   419→        Config.WorkerCount = v
+   420→   420→        if Config.FarmEnabled and Config.FarmMode=="Hybrid" then
+   421→   421→            task.spawn(function()
+   422→   422→                killWorkers()
+   423→   423→                local n=math.max(1,math.min(1000,v*Config.FarmSpeedMul))
+   424→   424→                if Config.TurboActive then n=math.min(1000,n*2) end
+   425→   425→                hybridState.currentWorkers=n
+   426→   426→                spawnWorkers(n)
+   427→   427→            end)
+   428→   428→        end
+   429→   429→    end,
+   430→   430→})
+   431→   431→FarmTab:CreateDropdown({
+   432→   432→    Name = "⚡ Multiplier",
+   433→   433→    Options = {"0.5x", "1x", "2x"},
+   434→   434→    CurrentOption = "1x",
+   435→   435→    Callback = function(v)
+   436→   436→        if v=="0.5x" then Config.FarmSpeedMul=0.5 elseif v=="2x" then Config.FarmSpeedMul=2 else Config.FarmSpeedMul=1 end
+   437→   437→    end,
+   438→   438→})
+   439→   439→FarmTab:CreateSection("⚙️ OPTIONS")
+   440→   440→FarmTab:CreateToggle({Name = "🛡️ Anti-Detect", CurrentValue = false, Callback = function(t) Config.AntiDetect=t end})
+   441→   441→FarmTab:CreateToggle({Name = "🔥 MAX PERFORMANCE", CurrentValue = false, Callback = function(t) Config.MaxPerformance=t end})
+   442→   442→local farmToggle = FarmTab:CreateToggle({
+   443→   443→    Name = "▶️ START FARM",
+   444→   444→    CurrentValue = false,
+   445→   445→    Callback = function(t) task.spawn(function() Config.FarmEnabled=t if t then startFarm() else stopFarm() end end) end,
+   446→   446→})
+   447→   447→FarmTab:CreateButton({Name = "🚀 TURBO BOOST", Callback = function() task.spawn(setTurbo) end})
+   448→   448→FarmTab:CreateSection("🌙 OVERNIGHT")
+   449→   449→FarmTab:CreateToggle({
+   450→   450→    Name = "🌙 Overnight Mode",
+   451→   451→    CurrentValue = false,
+   452→   452→    Callback = function(t) task.spawn(function() Config.OvernightEnabled=t if t then startOvernight() else stopOvernight() end end) end,
+   453→   453→})
+   454→   454→FarmTab:CreateSection("📊 LIVE STATS")
+   455→   455→local statsP = FarmTab:CreateParagraph({Title = "📊 Power Tracker", Content = "Start farm..."})
+   456→   456→task.spawn(function()
+   457→   457→    while task.wait(1) do
+   458→   458→        local power=powerTracker.tick() local gains=powerTracker.avgGainsPerSec() local trend=powerTracker.trend()
+   459→   459→        local ti=trend=="up" and "📈" or (trend=="down" and "📉" or "➡️")
+   460→   460→        local st=powerTracker.sessionStart>0 and math.floor(tick()-powerTracker.sessionStart) or 0
+   461→   461→        pcall(function() statsP:Set({Content="Power: "..formatNumber(power).."  |  "..ti.." "..formatNumber(gains).."/s  |  "..st.."s  |  "..activeWorkers.."W"}) end)
+   462→   462→    end
+   463→   463→end)
+   464→   464→
+   465→   465→-- ═══ TAB: Move ═══
+   466→   466→local MoveTab = Window:CreateTab("Move", "🏃")
+   467→   467→MoveTab:CreateSection("⚡ WALK & JUMP")
+   468→   468→local ot = MoveTab:CreateToggle({Name = "🔧 Override Stats", CurrentValue = false, Callback = function(t) Config.OverrideStats=t if t then applyMovement() else restoreMovement() end end})
+   469→   469→local ws = MoveTab:CreateSlider({Name = "🏃 WalkSpeed", Range = {16, 1000}, Increment = 1, CurrentValue = 16, Suffix = " sp", Callback = function(v) Config.WalkSpeed=v applyMovement() end})
+   470→   470→local js = MoveTab:CreateSlider({Name = "🦘 JumpPower", Range = {50, 1000}, Increment = 1, CurrentValue = 50, Suffix = " pw", Callback = function(v) Config.JumpPower=v applyMovement() end})
+   471→   471→MoveTab:CreateButton({Name = "🔄 Reset (16/50)", Callback = function()
+   472→   472→    Config.WalkSpeed=16 Config.JumpPower=50 Config.OverrideStats=false
+   473→   473→    ot:Set(false) ws:Set(16) js:Set(50) restoreMovement()
+   474→   474→    notify("🏃 Movement", "Reset", 3, "info")
+   475→   475→end})
+   476→   476→MoveTab:CreateSection("👻 NOCLIP")
+   477→   477→MoveTab:CreateDropdown({Name = "⚙️ Mode", Options = {"V777", "Improved"}, CurrentOption = "Improved", Callback = function(v) Config.NoclipMode=v if Config.NoclipEnabled then task.spawn(function() setNoclipMode(false) task.wait(0.05) setNoclipMode(true) end) end end})
+   478→   478→MoveTab:CreateToggle({Name = "👻 Noclip", CurrentValue = false, Callback = function(t) task.spawn(function() setNoclipMode(t) end) end})
+   479→   479→
+   480→   480→-- ═══ TAB: Identity ═══
+   481→   481→local IdTab = Window:CreateTab("ID", "🎭")
+   482→   482→IdTab:CreateSection("👤 CHAT IDENTITY")
+   483→   483→IdTab:CreateDropdown({Name = "🏷️ Title", Options = {"GLOBAL", "SERVER ANNOUNCEMENT", "👑Head Administrator👑", "👑Head Executive Lead Developer👑", "None"}, CurrentOption = "None", Callback = function(v) Config.CustomTag=(v=="None" or v=="") and "" or v end})
+   484→   484→IdTab:CreateDropdown({Name = "👤 Username", Options = {"RezurXshin☑️", "Jandel", "Administrator", "None"}, CurrentOption = "None", Callback = function(v) Config.UserName=(v=="None" or v=="") and "" or v end})
+   485→   485→IdTab:CreateInput({Name = "✏️ Custom Title", PlaceholderText = "Enter title...", Callback = function(v) Config.CustomTag=v or "" end})
+   486→   486→IdTab:CreateInput({Name = "✏️ Custom Name", PlaceholderText = "Enter name...", Callback = function(v) Config.UserName=v or "" end})
+   487→   487→IdTab:CreateSection("🎨 COLORS")
+   488→   488→IdTab:CreateColorPicker({Name = "🎨 Tag Color", Color = Config.TagColor, Callback = function(c) Config.TagColor=c end})
+   489→   489→IdTab:CreateColorPicker({Name = "🎨 User Color", Color = Config.UserColor, Callback = function(c) Config.UserColor=c end})
+   490→   490→IdTab:CreateColorPicker({Name = "🎨 Msg Color", Color = Config.MessageColor, Callback = function(c) Config.MessageColor=c end})
+   491→   491→
+   492→   492→-- ═══ TAB: Chat ═══
+   493→   493→local ChatTab = Window:CreateTab("Chat", "💬")
+   494→   494→ChatTab:CreateSection("👻 GHOST SHOUT")
+   495→   495→local chatInput = ChatTab:CreateInput({Name = "💬 Message", PlaceholderText = "Type message...", Callback = function(v) end})
+   496→   496→ChatTab:CreateButton({Name = "📤 Send", Callback = function()
+   497→   497→    local msg = chatInput:Get()
+   498→   498→    if msg and msg ~= "" then sendChatMessage(msg) notify("✅ Sent", msg:sub(1,40), 3, "success") chatInput:Set("") end
+   499→   499→end})
+   500→   500→ChatTab:CreateButton({Name = "📤 Resend", Callback = function()
+   501→   501→    local msg = chatInput:Get()
+   502→   502→    if msg and msg ~= "" then sendChatMessage(msg) notify("✅ Sent", msg:sub(1,40), 3, "success") else notify("⚠️ Chat", "Type first", 2, "warning") end
+   503→   503→end})
+   504→   504→ChatTab:CreateButton({Name = "🧹 Clear", Callback = function() chatInput:Set("") notify("💬 Chat", "Cleared", 2, "info") end})
+   505→   505→
+   506→   506→-- ═══ TAB: Lab ═══
+   507→   507→local LabTab = Window:CreateTab("Lab", "🧪")
+   508→   508→LabTab:CreateSection("⚙️ EXPERIMENTS")
+   509→   509→LabTab:CreateToggle({Name = "🛡️ Anti-AFK", CurrentValue = true, Callback = function(t) Config.AntiAfk=t end})
+   510→   510→LabTab:CreateToggle({Name = "⚔️ PVP Off (ON)", CurrentValue = true, Callback = function(t) Config.PvpOff=t end})
+   511→   511→LabTab:CreateSection("👁️ ESP")
+   512→   512→local function toggleESP(t)
+   513→   513→    Config.EspEnabled=t
+   514→   514→    if not t then clearEsp() return end
+   515→   515→    espConn=RunService.RenderStepped:Connect(function()
+   516→   516→        pcall(function()
+   517→   517→            local cr=workspace:FindFirstChild("Creature") local ac=cr and cr:FindFirstChild("Activation") if not ac then return end
+   518→   518→            local seen={}
+   519→   519→            for _,obj in ipairs(ac:GetChildren()) do for _,pm in ipairs(obj:GetChildren()) do
+   520→   520→                local h=pm:FindFirstChild("Head") if h then
+   521→   521→                    seen[h]=true local e=espCache[h] local pw=getPowerFor(pm.Name)
+   522→   522→                    if not e then
+   523→   523→                        local bb=Instance.new("BillboardGui") bb.Name="RT" bb.Adornee=h bb.Size=UDim2.new(0,100,0,30) bb.StudsOffset=Vector3.new(0,3,0) bb.AlwaysOnTop=true bb.Parent=h
+   524→   524→                        local l=Instance.new("TextLabel") l.Parent=bb l.Size=UDim2.new(1,0,1,0) l.BackgroundTransparency=1 l.TextColor3=Color3.new(1,1,1) l.TextStrokeTransparency=0 l.Font=Enum.Font.GothamBold l.TextSize=11 l.Text=formatNumber(pw)
+   525→   525→                        espCache[h]={gui=bb,label=l,lastValue=pw}
+   526→   526→                    elseif e.lastValue~=pw then e.label.Text=formatNumber(pw) e.lastValue=pw end
+   527→   527→                end
+   528→   528→            end end
+   529→   529→            for h,e in pairs(espCache) do if not seen[h] or not h.Parent then if e.gui then e.gui:Destroy() end espCache[h]=nil end end
+   530→   530→        end)
+   531→   531→    end)
+   532→   532→end
+   533→   533→LabTab:CreateToggle({Name = "👁️ ESP", CurrentValue = false, Callback = function(t) toggleESP(t) end})
+   534→   534→LabTab:CreateButton({Name = "🧹 Clear ESP", Callback = function() clearEsp() notify("👁️ ESP", "Cleared", 3, "info") end})
+   535→   535→
+   536→   536→-- ═══ TAB: System ═══
+   537→   537→local SysTab = Window:CreateTab("Sys", "⚙️")
+   538→   538→SysTab:CreateSection("💾 PROFILE")
+   539→   539→SysTab:CreateButton({Name = "💾 Save Profile", Callback = function()
+   540→   540→    local p={CustomTag=Config.CustomTag,UserName=Config.UserName,TagColor={Config.TagColor.R,Config.TagColor.G,Config.TagColor.B},UserColor={Config.UserColor.R,Config.UserColor.G,Config.UserColor.B},MessageColor={Config.MessageColor.R,Config.MessageColor.G,Config.MessageColor.B},FarmMode=Config.FarmMode,FarmSpeedMul=Config.FarmSpeedMul,WorkerCount=Config.WorkerCount,MaxPerformance=Config.MaxPerformance,TrainSpeedValue=Config.TrainSpeedValue,AntiDetect=Config.AntiDetect,WalkSpeed=Config.WalkSpeed,JumpPower=Config.JumpPower,NoclipMode=Config.NoclipMode,AntiAfk=Config.AntiAfk}
+   541→   541→    if writefile then writefile("DOMINUS_Profile.json",HttpService:JSONEncode(p)) notify("💾 Saved","Profile saved.",3,"success") else notify("❌ Error","writefile N/A",4,"error") end
+   542→   542→end})
+   543→   543→SysTab:CreateButton({Name = "📂 Load Profile", Callback = function()
+   544→   544→    if not readfile then notify("❌ Error","readfile N/A",4,"error") return end
+   545→   545→    local ok,c=pcall(readfile,"DOMINUS_Profile.json") if not ok or not c then notify("⚠️ Error","No profile",3,"warning") return end
+   546→   546→    local ok2,p=pcall(function() return HttpService:JSONDecode(c) end) if not ok2 or type(p)~="table" then notify("❌ Error","Corrupted",4,"error") return end
+   547→   547→    Config.CustomTag=p.CustomTag or "" Config.UserName=p.UserName or ""
+   548→   548→    if p.TagColor then Config.TagColor=Color3.new(p.TagColor[1],p.TagColor[2],p.TagColor[3]) end
+   549→   549→    if p.UserColor then Config.UserColor=Color3.new(p.UserColor[1],p.UserColor[2],p.UserColor[3]) end
+   550→   550→    if p.MessageColor then Config.MessageColor=Color3.new(p.MessageColor[1],p.MessageColor[2],p.MessageColor[3]) end
+   551→   551→    Config.FarmMode=p.FarmMode or "Hybrid" Config.FarmSpeedMul=p.FarmSpeedMul or 1 Config.WorkerCount=p.WorkerCount or 50 Config.MaxPerformance=p.MaxPerformance or false Config.TrainSpeedValue=p.TrainSpeedValue or "Infinity" Config.AntiDetect=p.AntiDetect~=nil and p.AntiDetect or false Config.WalkSpeed=p.WalkSpeed or 16 Config.JumpPower=p.JumpPower or 50 Config.NoclipMode=p.NoclipMode or "Improved" Config.AntiAfk=p.AntiAfk~=nil and p.AntiAfk or true
+   552→   552→    notify("📂 Loaded","Profile loaded.",3,"info")
+   553→   553→end})
+   554→   554→SysTab:CreateSection("❌ DANGER")
+   555→   555→local dc=false
+   556→   556→SysTab:CreateButton({Name = "❌ Destroy UI (confirm)", Callback = function()
+   557→   557→    if dc then Lib:Destroy() else dc=true notify("⚠️ Confirm","Click again 3s",3,"warning") task.delay(3,function() dc=false end) end
+   558→   558→end})
+   559→   559→
+   560→   560→-- ═══ TAB: About ═══
+   561→   561→local AboutTab = Window:CreateTab("About", "ℹ️")
+   562→   562→AboutTab:CreateSection("👑 ABOUT")
+   563→   563→AboutTab:CreateParagraph({Title = "👑 DOMINUS V8", Content = "👑 DOMINUS V8\n🔥 Maximum Power Edition\n\nMade by RezurXshin\nCreator of RezurXLabs\n\n🛡️ All rights reserved to RezurXshin (Creator of RezurXLabs)\n\n⚙️ Engine: Hybrid Farm + math.huge\n👻 Noclip: V777 + Improved\n🌙 Overnight Mode\n🚀 Turbo Boost\n💾 Save/Load Profiles\n\nPowered by RezurXLib"})
+   564→   564→AboutTab:CreateSection("👑 CREDITS")
+   565→   565→AboutTab:CreateParagraph({Title = "Credits", Content = "👑 Creator: RezurXshin\n🏢 Studio: RezurXLabs\n📦 UI: RezurXLib v1.0\n⚡ Engine: DOMINUS Hybrid Apex\n\n🛡️ All rights reserved.\n© 2026 RezurXshin."})
+   566→   566→
+   567→   567→-- ═══ KEYBOARD SHORTCUTS ═══
+   568→   568→UserInputService.InputBegan:Connect(function(inp, gp)
+   569→   569→    if gp then return end
+   570→   570→    local k = inp.KeyCode
+   571→   571→    if k == Enum.KeyCode.F and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+   572→   572→        Config.FarmEnabled = not Config.FarmEnabled
+   573→   573→        task.spawn(function() if Config.FarmEnabled then startFarm() else stopFarm() end end)
+   574→   574→        farmToggle:Set(Config.FarmEnabled)
+   575→   575→        notify("⌨️ Shortcut", "Farm: " .. (Config.FarmEnabled and "ON" or "OFF"), 2, "info")
+   576→   576→    elseif k == Enum.KeyCode.N and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+   577→   577→        Config.NoclipEnabled = not Config.NoclipEnabled
+   578→   578→        task.spawn(function() setNoclipMode(Config.NoclipEnabled) end)
+   579→   579→        notify("⌨️ Shortcut", "Noclip: " .. (Config.NoclipEnabled and "ON" or "OFF"), 2, "info")
+   580→   580→    elseif k == Enum.KeyCode.T and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+   581→   581→        task.spawn(setTurbo)
+   582→   582→    end
+   583→   583→end)
+   584→   584→
+   585→   585→-- ═══ BOOT ═══
+   586→   586→notify("👑 DOMINUS V8", "🔥 Loaded. Press K to toggle. Made by RezurXshin", 7, "success")
+   587→   587→

@@ -697,26 +697,42 @@ function Library:CreateWindow(cfg)
 		Tween(closeBtn, T10, { BackgroundColor3 = C.red })
 	end)
 
-	-- ------------------------------------------------------------
-	-- WINDOW DRAG (via shared drag router)
-	-- ------------------------------------------------------------
-	header.InputBegan:Connect(function(inp)
-		if inp.UserInputType == Enum.UserInputType.MouseButton1
-			or inp.UserInputType == Enum.UserInputType.Touch then
-			local dragStart = inp.Position
-			local startPos = frame.Position
-			Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-			registerDrag("window", function(pos)
-				local d = pos - dragStart
-				local np = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-					startPos.Y.Scale, startPos.Y.Offset + d.Y)
-				frame.Position = np
-				shadow.Position = UDim2.new(np.X.Scale, np.X.Offset - 18, np.Y.Scale, np.Y.Offset - 18)
-			end, function()
-				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-			end)
-		end
-	end)
+        -- ------------------------------------------------------------
+        -- WINDOW DRAG (via shared drag router)
+        -- [FIX] Use dedicated dragBar instead of header.InputBegan
+        -- to prevent drag from firing when clicking minBtn/closeBtn
+        -- ------------------------------------------------------------
+        local dragBar = Instance.new("TextButton")
+        dragBar.Name = "DragBar"
+        dragBar.Size = UDim2.new(1, -80, 1, 0)
+        dragBar.Position = UDim2.new(0, 0, 0, 0)
+        dragBar.BackgroundTransparency = 1
+        dragBar.Text = ""
+        dragBar.AutoButtonColor = false
+        dragBar.BorderSizePixel = 0
+        dragBar.ZIndex = 3
+        dragBar.Active = true
+        dragBar.Selectable = false
+        dragBar.Parent = header
+
+        dragBar.InputBegan:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1
+                        or inp.UserInputType == Enum.UserInputType.Touch then
+                        local dragStart = inp.Position
+                        local startPos = frame.Position
+                        Tween(shadow, T15, { BackgroundTransparency = 0.65 })
+                        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+                        registerDrag("window", function(pos)
+                                local d = pos - dragStart
+                                local nx = math.clamp(startPos.X.Offset + d.X, -WIN_W + 100, vp.X - 100)
+                                local ny = math.clamp(startPos.Y.Offset + d.Y, 0, vp.Y - 30)
+                                frame.Position = UDim2.new(0, nx, 0, ny)
+                                shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
+                        end, function()
+                                Tween(shadow, T15, { BackgroundTransparency = 0.52 })
+                        end)
+                end
+        end)
 
 	-- ------------------------------------------------------------
 	-- TAB BAR + SLIDING INDICATOR

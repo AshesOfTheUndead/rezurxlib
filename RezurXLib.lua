@@ -394,6 +394,26 @@ function Library:CreateWindow(cfg)
 	if not screenGui.Parent then screenGui.Parent = playerGui end
 	WindowJanitor:Add(screenGui)
 
+	-- ═══ AUTO SCALE (mobile friendly) ═══
+	local function getViewport()
+		local cam = workspace.CurrentCamera
+		return cam and cam.ViewportSize or Vector2.new(1920, 1080)
+	end
+	local function updateScale()
+		local vp = getViewport()
+		local scaleX = (vp.X - 20) / WIN_W
+		local scaleY = (vp.Y - 60) / WIN_H
+		local scale = math.clamp(math.min(scaleX, scaleY), 0.5, 1.0)
+		if screenGui:FindFirstChild("UIScale") then
+			screenGui.UIScale.Scale = scale
+		end
+	end
+	updateScale()
+	WindowJanitor:Add(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale))
+	local uiScale = Instance.new("UIScale")
+	uiScale.Scale = 1
+	uiScale.Parent = screenGui
+
 	local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 24
 
 	-- ------------------------------------------------------------
@@ -719,6 +739,47 @@ function Library:CreateWindow(cfg)
 	end)
 	closeBtn.MouseLeave:Connect(function()
 		Tween(closeBtn, T10, { BackgroundColor3 = C.red })
+	end)
+
+	-- ═══ FLOATING RESTORE ICON ═══
+	local floatIcon = Instance.new("TextButton")
+	floatIcon.Name = "FloatIcon"
+	floatIcon.Size = UDim2.new(0, 44, 0, 44)
+	floatIcon.Position = UDim2.new(0, 10, 0, 10)
+	floatIcon.BackgroundColor3 = C.accent
+	floatIcon.Text = "👑"
+	floatIcon.Font = Enum.Font.GothamBold
+	floatIcon.TextSize = 20
+	floatIcon.TextColor3 = C.white
+	floatIcon.AutoButtonColor = false
+	floatIcon.BorderSizePixel = 0
+	floatIcon.ZIndex = 100
+	floatIcon.Visible = false
+	floatIcon.Parent = screenGui
+	corner(floatIcon, UDim.new(1, 0))
+	stroke(floatIcon, C.white, 2)
+	floatIcon.InputBegan:Connect(function(inp)
+		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+			local startDrag = inp.Position
+			local startPos = floatIcon.Position
+			local vp = getViewport()
+			registerDrag("floatIcon", function(pos)
+				local d = pos - startDrag
+				local nx = math.clamp(startPos.X.Offset + d.X, 0, vp.X - 44)
+				local ny = math.clamp(startPos.Y.Offset + d.Y, 0, vp.Y - 44)
+				floatIcon.Position = UDim2.new(0, nx, 0, ny)
+			end)
+		end
+	end)
+	floatIcon.Activated:Connect(function()
+		floatIcon.Visible = false
+		frame.Visible = true
+		shadow.Visible = true
+		if not minimized then
+			tabBar.Visible = true
+			content.Visible = true
+			statusBar.Visible = true
+		end
 	end)
 
         -- ------------------------------------------------------------
@@ -1070,8 +1131,9 @@ function Library:CreateWindow(cfg)
 	end
 	closeBtn.MouseButton1Click:Connect(function()
 		closeCurrentPopup()
-		setHidden(true)
-		notify("Interface Hidden", "Press " .. keyName(toggleKey) .. " to reopen.", 4, "info")
+		frame.Visible = false
+		shadow.Visible = false
+		floatIcon.Visible = true
 	end)
 	WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
 		if gp then return end

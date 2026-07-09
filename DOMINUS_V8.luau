@@ -386,7 +386,7 @@ local Window = Lib:CreateWindow({
     LoadingEnabled = false,
     Theme = "Ember",
     ToggleUIKeybind = Enum.KeyCode.K,
-    Size = Vector2.new(360, 360),  -- [FIX] shorter for mobile
+    -- [FIX] No Size = library uses 200x210 default (2x smaller than before)
 })
 
 notify = function(title, body, duration, ntype)

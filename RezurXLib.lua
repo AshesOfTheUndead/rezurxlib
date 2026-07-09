@@ -304,8 +304,8 @@ function Library:CreateWindow(cfg)
 	local loadingTitle = cfg.LoadingTitle or windowName
 	local loadingOn    = cfg.LoadingEnabled ~= false
 	local toggleKey    = cfg.ToggleUIKeybind or Enum.KeyCode.K
-	local WIN_W        = (cfg.Size and cfg.Size.X) or 400  -- smaller default for mobile
-	local WIN_H        = (cfg.Size and cfg.Size.Y) or 420  -- smaller default for mobile
+	local WIN_W        = (cfg.Size and cfg.Size.X) or 200  -- [FIX] halved for mobile
+	local WIN_H        = (cfg.Size and cfg.Size.Y) or 210  -- [FIX] halved for mobile
 
 	-- ------------------------------------------------------------
 	-- IDEMPOTENT GUARD — keyed to THIS window's name, so re-running
@@ -405,7 +405,8 @@ function Library:CreateWindow(cfg)
 		local scaleX = (vp.X - 16) / WIN_W
 		local scaleY = (vp.Y - 120) / WIN_H
 		-- Allow shrinking down to 0.35 on small phones (was 0.5 — too big)
-		local scale = math.clamp(math.min(scaleX, scaleY), 0.35, 1.0)
+		local scale = math.clamp(math.min(scaleX, scaleY), 0.35, 0.55)
+		-- [FIX] Scale ceiling 0.55 = UI stays small even on desktop (was 1.0)
 		if screenGui:FindFirstChild("UIScale") then
 			screenGui.UIScale.Scale = scale
 		end
@@ -427,7 +428,7 @@ function Library:CreateWindow(cfg)
 	local shadow = Instance.new("Frame")
 	shadow.Name = "Shadow"
 	shadow.Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36)
-	shadow.Position = UDim2.new(0.5, -(WIN_W + 36) / 2, 0.5, -(WIN_H + 36) / 2)
+	shadow.Position = UDim2.new(0.5, -(WIN_W + 36) / 2, 0.7, -(WIN_H + 36) / 2)  -- [FIX] lower on screen
 	shadow.BackgroundColor3 = Color3.new(0, 0, 0)
 	shadow.BackgroundTransparency = 0.52
 	shadow.BorderSizePixel = 0
@@ -438,7 +439,7 @@ function Library:CreateWindow(cfg)
 	local frame = Instance.new("Frame")
 	frame.Name = "Window"
 	frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
-	frame.Position = UDim2.new(0.5, -WIN_W / 2, 0.5, -WIN_H / 2)
+	frame.Position = UDim2.new(0.5, -WIN_W / 2, 0.7, -WIN_H / 2)  -- [FIX] lower on screen
 	frame.BackgroundColor3 = C.bg
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
@@ -846,7 +847,7 @@ function Library:CreateWindow(cfg)
 
 	local tabIndicator = Instance.new("Frame")
 	tabIndicator.Name = "ActiveIndicator"
-	tabIndicator.Size = UDim2.new(0, 0, 0, TABBAR_H - 10)
+	tabIndicator.Size = UDim2.new(0, 70, 0, TABBAR_H - 10)
 	tabIndicator.Position = UDim2.new(0, 4, 0, 5)
 	tabIndicator.BackgroundColor3 = C.accentDark
 	tabIndicator.BorderSizePixel = 0
@@ -1273,7 +1274,9 @@ function Library:CreateWindow(cfg)
 
 		local btn = Instance.new("TextButton")
 		btn.Name = "TabChip"
-		btn.Size = UDim2.new(0, 0, 1, -10)
+		-- [FIX] AutomaticSize X so btn grows to fit icon+text (was 0 width → blank)
+		btn.Size = UDim2.new(0, 70, 1, -10)
+		btn.AutomaticSize = Enum.AutomaticSize.X
 		btn.Position = UDim2.new(0, 0, 0, 5)
 		btn.BackgroundColor3 = C.tabChip
 		btn.AutoButtonColor = false
@@ -1303,8 +1306,9 @@ function Library:CreateWindow(cfg)
 		iconLbl.Parent = btn
 
 		local textLbl = Instance.new("TextLabel")
-		textLbl.Size = UDim2.new(0, 60, 1, 0)  -- fixed width so text is visible
-			textLbl.AutomaticSize = Enum.AutomaticSize.None  -- disabled
+		-- [FIX] AutomaticSize X so label grows to fit text (was fixed 60px → text clipped)
+		textLbl.Size = UDim2.new(0, 50, 1, 0)
+		textLbl.AutomaticSize = Enum.AutomaticSize.X
 		textLbl.BackgroundTransparency = 1
 		textLbl.Font = Enum.Font.GothamBold
 		textLbl.TextSize = 12
@@ -1337,17 +1341,13 @@ function Library:CreateWindow(cfg)
 		tab.Btn = btn
 		tab.Name = name
 
-			local function updateBtnSize()
-				local textW = textLbl.TextBounds.X > 0 and textLbl.TextBounds.X or 50
-				local iconW = icon and 16 or 0
-				local w = math.max(textW + iconW + (icon and 5 or 0) + 24, 60)
-				btn.Size = UDim2.new(0, w, 1, -10)
+			-- [FIX] updateBtnSize removed — btn uses AutomaticSize.X now
+			-- Just move the indicator to the btn's current position on load
+			task.defer(function()
 				if ActiveTab == tab then
 					moveIndicatorTo(btn, false)
 				end
-		end
-		textLbl:GetPropertyChangedSignal("TextBounds"):Connect(updateBtnSize)
-		updateBtnSize()
+		end)
 
 		local function setActive(skipAnim)
 			closeCurrentPopup()

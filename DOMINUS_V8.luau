@@ -394,22 +394,23 @@ notify = function(title, body, duration, ntype)
 end
 
 -- ═══ TAB: Farm ═══
+local UI = {}  -- [FIX] holds refs to every interactive element so Load can :Set() them
 local FarmTab = Window:CreateTab("Farm", "💪")
 FarmTab:CreateSection("🔥 MODE & SPEED")
-FarmTab:CreateDropdown({
+UI.FarmMode = FarmTab:CreateDropdown({
     Name = "⚡ Mode",
     Options = {"Hybrid", "Legacy"},
     CurrentOption = "Hybrid",
     Callback = function(v) Config.FarmMode=v if Config.FarmEnabled then task.spawn(function() stopFarm() task.wait(0.1) startFarm() end) end end,
 })
-FarmTab:CreateDropdown({
+UI.TrainSpeed = FarmTab:CreateDropdown({
     Name = "🚀 Speed",
     Options = {"Infinity", "1e9", "1e15"},
     CurrentOption = "Infinity",
     Callback = function(v) Config.TrainSpeedValue=v end,
 })
 -- [FIX] No debounce needed — library slider now only fires callback on click + drag END
-FarmTab:CreateSlider({
+UI.Workers = FarmTab:CreateSlider({
     Name = "👥 Workers (1-1000)",
     Range = {1, 1000},
     Increment = 1,
@@ -428,7 +429,8 @@ FarmTab:CreateSlider({
         end
     end,
 })
-FarmTab:CreateDropdown({
+local function mulToStr(m) if m==0.5 then return "0.5x" elseif m==2 then return "2x" else return "1x" end end
+UI.FarmSpeedMul = FarmTab:CreateDropdown({
     Name = "⚡ Multiplier",
     Options = {"0.5x", "1x", "2x"},
     CurrentOption = "1x",
@@ -437,8 +439,8 @@ FarmTab:CreateDropdown({
     end,
 })
 FarmTab:CreateSection("⚙️ OPTIONS")
-FarmTab:CreateToggle({Name = "🛡️ Anti-Detect", CurrentValue = false, Callback = function(t) Config.AntiDetect=t end})
-FarmTab:CreateToggle({Name = "🔥 MAX PERFORMANCE", CurrentValue = false, Callback = function(t) Config.MaxPerformance=t end})
+UI.AntiDetect = FarmTab:CreateToggle({Name = "🛡️ Anti-Detect", CurrentValue = false, Callback = function(t) Config.AntiDetect=t end})
+UI.MaxPerf = FarmTab:CreateToggle({Name = "🔥 MAX PERFORMANCE", CurrentValue = false, Callback = function(t) Config.MaxPerformance=t end})
 local farmToggle = FarmTab:CreateToggle({
     Name = "▶️ FARM: OFF",
     CurrentValue = false,
@@ -452,7 +454,7 @@ local farmToggle = FarmTab:CreateToggle({
 })
 FarmTab:CreateButton({Name = "🚀 TURBO BOOST", Callback = function() task.spawn(setTurbo) end})
 FarmTab:CreateSection("🌙 OVERNIGHT")
-FarmTab:CreateToggle({
+UI.Overnight = FarmTab:CreateToggle({
     Name = "🌙 Overnight Mode",
     CurrentValue = false,
     Callback = function(t) task.spawn(function() Config.OvernightEnabled=t if t then startOvernight() else stopOvernight() end end) end,
@@ -480,35 +482,40 @@ local ot = MoveTab:CreateToggle({
         if t then applyMovement() else restoreMovement() end
     end,
 })
+UI.OverrideStats = ot
 local ws = MoveTab:CreateSlider({Name = "🏃 WalkSpeed", Range = {16, 1000}, Increment = 1, CurrentValue = 16, Suffix = " sp", Callback = function(v) Config.WalkSpeed=v applyMovement() end})
 local js = MoveTab:CreateSlider({Name = "🦘 JumpPower", Range = {50, 1000}, Increment = 1, CurrentValue = 50, Suffix = " pw", Callback = function(v) Config.JumpPower=v applyMovement() end})
+UI.WalkSpeed = ws
+UI.JumpPower = js
 MoveTab:CreateButton({Name = "🔄 Reset (16/50)", Callback = function()
     Config.WalkSpeed=16 Config.JumpPower=50 Config.OverrideStats=false
     ot:Set(false) ws:Set(16) js:Set(50) restoreMovement()
     notify("🏃 Movement", "Reset", 3, "info")
 end})
 MoveTab:CreateSection("👻 NOCLIP")
-MoveTab:CreateDropdown({Name = "⚙️ Mode", Options = {"V777", "Improved"}, CurrentOption = "Improved", Callback = function(v) Config.NoclipMode=v if Config.NoclipEnabled then task.spawn(function() setNoclipMode(false) task.wait(0.05) setNoclipMode(true) end) end end})
+UI.NoclipMode = MoveTab:CreateDropdown({Name = "⚙️ Mode", Options = {"V777", "Improved"}, CurrentOption = "Improved", Callback = function(v) Config.NoclipMode=v if Config.NoclipEnabled then task.spawn(function() setNoclipMode(false) task.wait(0.05) setNoclipMode(true) end) end end})
 local noclipToggle = MoveTab:CreateToggle({
     Name = "👻 Noclip: OFF",
     CurrentValue = false,
     Callback = function(t)
+        Config.NoclipEnabled = t
         task.spawn(function() setNoclipMode(t) end)
         noclipToggle:SetLabel(t and "👻 Noclip: ON" or "👻 Noclip: OFF")
     end,
 })
+UI.Noclip = noclipToggle
 
 -- ═══ TAB: Identity ═══
 local IdTab = Window:CreateTab("ID", "🎭")
 IdTab:CreateSection("👤 CHAT IDENTITY")
-IdTab:CreateDropdown({Name = "🏷️ Title", Options = {"GLOBAL", "SERVER ANNOUNCEMENT", "👑Head Administrator👑", "👑Head Executive Lead Developer👑", "None"}, CurrentOption = "None", Callback = function(v) Config.CustomTag=(v=="None" or v=="") and "" or v end})
-IdTab:CreateDropdown({Name = "👤 Username", Options = {"RezurXshin☑️", "Jandel", "Administrator", "None"}, CurrentOption = "None", Callback = function(v) Config.UserName=(v=="None" or v=="") and "" or v end})
-IdTab:CreateInput({Name = "✏️ Custom Title", PlaceholderText = "Enter title...", Callback = function(v) Config.CustomTag=v or "" end})
-IdTab:CreateInput({Name = "✏️ Custom Name", PlaceholderText = "Enter name...", Callback = function(v) Config.UserName=v or "" end})
+UI.TitlePreset = IdTab:CreateDropdown({Name = "🏷️ Title", Options = {"GLOBAL", "SERVER ANNOUNCEMENT", "👑Head Administrator👑", "👑Head Executive Lead Developer👑", "None"}, CurrentOption = "None", Callback = function(v) Config.CustomTag=(v=="None" or v=="") and "" or v UI.CustomTitle:Set(Config.CustomTag) end})
+UI.NamePreset = IdTab:CreateDropdown({Name = "👤 Username", Options = {"RezurXshin☑️", "Jandel", "Administrator", "None"}, CurrentOption = "None", Callback = function(v) Config.UserName=(v=="None" or v=="") and "" or v UI.CustomName:Set(Config.UserName) end})
+UI.CustomTitle = IdTab:CreateInput({Name = "✏️ Custom Title", PlaceholderText = "Enter title...", Callback = function(v) Config.CustomTag=v or "" end})
+UI.CustomName = IdTab:CreateInput({Name = "✏️ Custom Name", PlaceholderText = "Enter name...", Callback = function(v) Config.UserName=v or "" end})
 IdTab:CreateSection("🎨 COLORS")
-IdTab:CreateColorPicker({Name = "🎨 Tag Color", Color = Config.TagColor, Callback = function(c) Config.TagColor=c end})
-IdTab:CreateColorPicker({Name = "🎨 User Color", Color = Config.UserColor, Callback = function(c) Config.UserColor=c end})
-IdTab:CreateColorPicker({Name = "🎨 Msg Color", Color = Config.MessageColor, Callback = function(c) Config.MessageColor=c end})
+UI.TagColor = IdTab:CreateColorPicker({Name = "🎨 Tag Color", Color = Config.TagColor, Callback = function(c) Config.TagColor=c end})
+UI.UserColor = IdTab:CreateColorPicker({Name = "🎨 User Color", Color = Config.UserColor, Callback = function(c) Config.UserColor=c end})
+UI.MsgColor = IdTab:CreateColorPicker({Name = "🎨 Msg Color", Color = Config.MessageColor, Callback = function(c) Config.MessageColor=c end})
 
 -- ═══ TAB: Chat ═══
 local ChatTab = Window:CreateTab("Chat", "💬")
@@ -527,16 +534,16 @@ ChatTab:CreateButton({Name = "🧹 Clear", Callback = function() chatInput:Set("
 -- ═══ TAB: Lab ═══
 local LabTab = Window:CreateTab("Lab", "🧪")
 LabTab:CreateSection("⚙️ EXPERIMENTS")
-LabTab:CreateToggle({Name = "🛡️ Anti-AFK", CurrentValue = true, Callback = function(t) Config.AntiAfk=t end})
+UI.AntiAfk = LabTab:CreateToggle({Name = "🛡️ Anti-AFK", CurrentValue = true, Callback = function(t) Config.AntiAfk=t end})
 local pvpToggle = LabTab:CreateToggle({
     Name = "⚔️ PVP: OFF (Safe)",
     CurrentValue = true,
     Callback = function(t)
         Config.PvpOff = t
-        -- [FIX] Dynamic label — shows current state so user knows it worked
         pvpToggle:SetLabel(t and "⚔️ PVP: OFF (Safe)" or "⚔️ PVP: ON (Danger)")
     end,
 })
+UI.PvpOff = pvpToggle
 LabTab:CreateSection("👁️ ESP")
 local function toggleESP(t)
     Config.EspEnabled=t
@@ -559,26 +566,88 @@ local function toggleESP(t)
         end)
     end)
 end
-LabTab:CreateToggle({Name = "👁️ ESP", CurrentValue = false, Callback = function(t) toggleESP(t) end})
+UI.Esp = LabTab:CreateToggle({Name = "👁️ ESP", CurrentValue = false, Callback = function(t) toggleESP(t) end})
 LabTab:CreateButton({Name = "🧹 Clear ESP", Callback = function() clearEsp() notify("👁️ ESP", "Cleared", 3, "info") end})
 
 -- ═══ TAB: System ═══
 local SysTab = Window:CreateTab("Sys", "⚙️")
 SysTab:CreateSection("💾 PROFILE")
+
+-- [FIX] Save: write ALL config values (was missing PvpOff, NoclipEnabled, OverrideStats, etc.)
+local PROFILE_FILE = "DOMINUS_Profile.json"
+local function buildProfile()
+    return {
+        CustomTag=Config.CustomTag, UserName=Config.UserName,
+        TagColor={Config.TagColor.R,Config.TagColor.G,Config.TagColor.B},
+        UserColor={Config.UserColor.R,Config.UserColor.G,Config.UserColor.B},
+        MessageColor={Config.MessageColor.R,Config.MessageColor.G,Config.MessageColor.B},
+        FarmMode=Config.FarmMode, FarmSpeedMul=Config.FarmSpeedMul,
+        WorkerCount=Config.WorkerCount, MaxPerformance=Config.MaxPerformance,
+        TrainSpeedValue=Config.TrainSpeedValue, AntiDetect=Config.AntiDetect,
+        WalkSpeed=Config.WalkSpeed, JumpPower=Config.JumpPower,
+        OverrideStats=Config.OverrideStats, NoclipMode=Config.NoclipMode,
+        NoclipEnabled=Config.NoclipEnabled, AntiAfk=Config.AntiAfk,
+        PvpOff=Config.PvpOff,
+    }
+end
+
+-- [FIX] Load: call :Set() on every UI element so display + Config + side-effects all update.
+-- Setting Config.* directly (old behaviour) left the UI showing stale values and never
+-- fired callbacks — so applyMovement / setNoclipMode / etc. never ran.
+local function applyProfile(p)
+    -- Dropdowns
+    if p.FarmMode and UI.FarmMode then UI.FarmMode:Set(p.FarmMode) end
+    if p.TrainSpeedValue and UI.TrainSpeed then UI.TrainSpeed:Set(p.TrainSpeedValue) end
+    if p.FarmSpeedMul and UI.FarmSpeedMul then UI.FarmSpeedMul:Set(mulToStr(p.FarmSpeedMul)) end
+    if p.NoclipMode and UI.NoclipMode then UI.NoclipMode:Set(p.NoclipMode) end
+    -- Sliders
+    if p.WorkerCount and UI.Workers then UI.Workers:Set(p.WorkerCount) end
+    if p.WalkSpeed and UI.WalkSpeed then UI.WalkSpeed:Set(p.WalkSpeed) end
+    if p.JumpPower and UI.JumpPower then UI.JumpPower:Set(p.JumpPower) end
+    -- Toggles
+    if UI.AntiDetect and p.AntiDetect ~= nil then UI.AntiDetect:Set(p.AntiDetect) end
+    if UI.MaxPerf and p.MaxPerformance ~= nil then UI.MaxPerf:Set(p.MaxPerformance) end
+    if UI.Overnight and p.OvernightEnabled ~= nil then UI.Overnight:Set(false) end  -- never auto-start overnight
+    if UI.OverrideStats and p.OverrideStats ~= nil then UI.OverrideStats:Set(p.OverrideStats) end
+    if UI.Noclip and p.NoclipEnabled ~= nil then UI.Noclip:Set(p.NoclipEnabled) end
+    if UI.AntiAfk and p.AntiAfk ~= nil then UI.AntiAfk:Set(p.AntiAfk) end
+    if UI.PvpOff and p.PvpOff ~= nil then UI.PvpOff:Set(p.PvpOff) end
+    if UI.Esp then UI.Esp:Set(false) end  -- never auto-start ESP
+    -- Inputs
+    if UI.CustomTitle then UI.CustomTitle:Set(p.CustomTag or "") end
+    if UI.CustomName then UI.CustomName:Set(p.UserName or "") end
+    -- Dropdowns that mirror the inputs
+    if UI.TitlePreset then UI.TitlePreset:Set("None") end
+    if UI.NamePreset then UI.NamePreset:Set("None") end
+    -- Color pickers
+    if p.TagColor and UI.TagColor then UI.TagColor:Set(Color3.new(p.TagColor[1],p.TagColor[2],p.TagColor[3])) end
+    if p.UserColor and UI.UserColor then UI.UserColor:Set(Color3.new(p.UserColor[1],p.UserColor[2],p.UserColor[3])) end
+    if p.MessageColor and UI.MsgColor then UI.MsgColor:Set(Color3.new(p.MessageColor[1],p.MessageColor[2],p.MessageColor[3])) end
+end
+
 SysTab:CreateButton({Name = "💾 Save Profile", Callback = function()
-    local p={CustomTag=Config.CustomTag,UserName=Config.UserName,TagColor={Config.TagColor.R,Config.TagColor.G,Config.TagColor.B},UserColor={Config.UserColor.R,Config.UserColor.G,Config.UserColor.B},MessageColor={Config.MessageColor.R,Config.MessageColor.G,Config.MessageColor.B},FarmMode=Config.FarmMode,FarmSpeedMul=Config.FarmSpeedMul,WorkerCount=Config.WorkerCount,MaxPerformance=Config.MaxPerformance,TrainSpeedValue=Config.TrainSpeedValue,AntiDetect=Config.AntiDetect,WalkSpeed=Config.WalkSpeed,JumpPower=Config.JumpPower,NoclipMode=Config.NoclipMode,AntiAfk=Config.AntiAfk}
-    if writefile then writefile("DOMINUS_Profile.json",HttpService:JSONEncode(p)) notify("💾 Saved","Profile saved.",3,"success") else notify("❌ Error","writefile N/A",4,"error") end
+    if not writefile then notify("❌ Error","writefile N/A",4,"error") return end
+    local ok, err = pcall(function() writefile(PROFILE_FILE, HttpService:JSONEncode(buildProfile())) end)
+    if ok then notify("💾 Saved","Profile saved to "..PROFILE_FILE,3,"success") else notify("❌ Save Failed", tostring(err):sub(1,60), 4, "error") end
 end})
 SysTab:CreateButton({Name = "📂 Load Profile", Callback = function()
     if not readfile then notify("❌ Error","readfile N/A",4,"error") return end
-    local ok,c=pcall(readfile,"DOMINUS_Profile.json") if not ok or not c then notify("⚠️ Error","No profile",3,"warning") return end
-    local ok2,p=pcall(function() return HttpService:JSONDecode(c) end) if not ok2 or type(p)~="table" then notify("❌ Error","Corrupted",4,"error") return end
-    Config.CustomTag=p.CustomTag or "" Config.UserName=p.UserName or ""
-    if p.TagColor then Config.TagColor=Color3.new(p.TagColor[1],p.TagColor[2],p.TagColor[3]) end
-    if p.UserColor then Config.UserColor=Color3.new(p.UserColor[1],p.UserColor[2],p.UserColor[3]) end
-    if p.MessageColor then Config.MessageColor=Color3.new(p.MessageColor[1],p.MessageColor[2],p.MessageColor[3]) end
-    Config.FarmMode=p.FarmMode or "Hybrid" Config.FarmSpeedMul=p.FarmSpeedMul or 1 Config.WorkerCount=p.WorkerCount or 50 Config.MaxPerformance=p.MaxPerformance or false Config.TrainSpeedValue=p.TrainSpeedValue or "Infinity" Config.AntiDetect=p.AntiDetect~=nil and p.AntiDetect or false Config.WalkSpeed=p.WalkSpeed or 16 Config.JumpPower=p.JumpPower or 50 Config.NoclipMode=p.NoclipMode or "Improved" Config.AntiAfk=p.AntiAfk~=nil and p.AntiAfk or true
-    notify("📂 Loaded","Profile loaded.",3,"info")
+    local ok,c = pcall(readfile, PROFILE_FILE)
+    if not ok or not c then notify("⚠️ No Profile","Save a profile first.",3,"warning") return end
+    local ok2,p = pcall(function() return HttpService:JSONDecode(c) end)
+    if not ok2 or type(p) ~= "table" then notify("❌ Error","Profile corrupted.",4,"error") return end
+    applyProfile(p)
+    notify("📂 Loaded","Profile applied to all settings.",3,"info")
+end})
+SysTab:CreateButton({Name = "🗑️ Reset to Defaults", Callback = function()
+    applyProfile({
+        CustomTag="", UserName="", TagColor={128,0,0}, UserColor={255,255,255}, MessageColor={255,255,255},
+        FarmMode="Hybrid", FarmSpeedMul=1, WorkerCount=50, MaxPerformance=false,
+        TrainSpeedValue="Infinity", AntiDetect=false, WalkSpeed=16, JumpPower=50,
+        OverrideStats=false, NoclipMode="Improved", NoclipEnabled=false,
+        AntiAfk=true, PvpOff=true,
+    })
+    notify("🔄 Reset","All settings reset to defaults.",3,"info")
 end})
 SysTab:CreateSection("❌ DANGER")
 local dc=false

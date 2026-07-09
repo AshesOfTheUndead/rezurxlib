@@ -304,8 +304,8 @@ function Library:CreateWindow(cfg)
 	local loadingTitle = cfg.LoadingTitle or windowName
 	local loadingOn    = cfg.LoadingEnabled ~= false
 	local toggleKey    = cfg.ToggleUIKeybind or Enum.KeyCode.K
-	local WIN_W        = (cfg.Size and cfg.Size.X) or 200  -- [FIX] halved for mobile
-	local WIN_H        = (cfg.Size and cfg.Size.Y) or 210  -- [FIX] halved for mobile
+	local WIN_W        = (cfg.Size and cfg.Size.X) or 320  -- mobile-first (fits 360px phones)
+	local WIN_H        = (cfg.Size and cfg.Size.Y) or 380  -- mobile-first
 
 	-- ------------------------------------------------------------
 	-- IDEMPOTENT GUARD — keyed to THIS window's name, so re-running
@@ -405,8 +405,7 @@ function Library:CreateWindow(cfg)
 		local scaleX = (vp.X - 16) / WIN_W
 		local scaleY = (vp.Y - 120) / WIN_H
 		-- Allow shrinking down to 0.35 on small phones (was 0.5 — too big)
-		local scale = math.clamp(math.min(scaleX, scaleY), 0.35, 0.55)
-		-- [FIX] Scale ceiling 0.55 = UI stays small even on desktop (was 1.0)
+		local scale = math.clamp(math.min(scaleX, scaleY), 0.4, 1.0)
 		if screenGui:FindFirstChild("UIScale") then
 			screenGui.UIScale.Scale = scale
 		end
@@ -428,7 +427,7 @@ function Library:CreateWindow(cfg)
 	local shadow = Instance.new("Frame")
 	shadow.Name = "Shadow"
 	shadow.Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36)
-	shadow.Position = UDim2.new(0.5, -(WIN_W + 36) / 2, 0.7, -(WIN_H + 36) / 2)  -- [FIX] lower on screen
+	shadow.Position = UDim2.new(0.5, -(WIN_W + 36) / 2, 0.55, -(WIN_H + 36) / 2)
 	shadow.BackgroundColor3 = Color3.new(0, 0, 0)
 	shadow.BackgroundTransparency = 0.52
 	shadow.BorderSizePixel = 0
@@ -439,7 +438,7 @@ function Library:CreateWindow(cfg)
 	local frame = Instance.new("Frame")
 	frame.Name = "Window"
 	frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
-	frame.Position = UDim2.new(0.5, -WIN_W / 2, 0.7, -WIN_H / 2)  -- [FIX] lower on screen
+	frame.Position = UDim2.new(0.5, -WIN_W / 2, 0.55, -WIN_H / 2)
 	frame.BackgroundColor3 = C.bg
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true

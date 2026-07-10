@@ -384,9 +384,11 @@ function Library:CreateWindow(cfg)
 	-- drags on tap.
 	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
-	local DragHandlers = {}
+	-- [FIX] Single active drag — prevents cross-talk where multiple handlers fire simultaneously
+	local currentDrag = nil
 	local function registerDrag(key, moveFn, onEndFn, threshold)
-		DragHandlers[key] = {
+		currentDrag = {
+			key       = key,
 			move      = moveFn,
 			onEnd     = onEndFn,
 			threshold = threshold or 0,
@@ -398,18 +400,17 @@ function Library:CreateWindow(cfg)
 	WindowJanitor:Add(UserInputService.InputChanged:Connect(function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseMovement
 			or inp.UserInputType == Enum.UserInputType.Touch then
-			for _, h in pairs(DragHandlers) do
-				if h.move then
-					if h.threshold > 0 and not h.armed then
-						if not h.startPos then
-							h.startPos = inp.Position
-						elseif (inp.Position - h.startPos).Magnitude >= h.threshold then
-							h.armed = true
-						end
+			if currentDrag and currentDrag.move then
+				local h = currentDrag
+				if h.threshold > 0 and not h.armed then
+					if not h.startPos then
+						h.startPos = inp.Position
+					elseif (inp.Position - h.startPos).Magnitude >= h.threshold then
+						h.armed = true
 					end
-					if h.threshold == 0 or h.armed then
-						pcall(h.move, inp.Position)
-					end
+				end
+				if h.threshold == 0 or h.armed then
+					pcall(h.move, inp.Position)
 				end
 			end
 		end
@@ -418,10 +419,10 @@ function Library:CreateWindow(cfg)
 	WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1
 			or inp.UserInputType == Enum.UserInputType.Touch then
-			for _, h in pairs(DragHandlers) do
-				if h.onEnd then pcall(h.onEnd) end
+			if currentDrag then
+				if currentDrag.onEnd then pcall(currentDrag.onEnd) end
+				currentDrag = nil
 			end
-			table.clear(DragHandlers)
 		end
 	end))
 
@@ -1557,6 +1558,8 @@ function Library:CreateWindow(cfg)
 		local btn = Instance.new("TextButton")
 		btn.Name = "TabChip"
 		btn.Size = UDim2.new(0, 90, 1, -10)
+		btn.AutomaticSize = Enum.AutomaticSize.X
+		btn.TextXAlignment = Enum.TextXAlignment.Center
 		btn.Position = UDim2.new(0, 0, 0, 5)
 		btn.BackgroundColor3 = C.tabChip
 		btn.AutoButtonColor = false
@@ -2374,17 +2377,13 @@ function Library:CreateWindow(cfg)
 							table.clear(selected)
 							selected[opt] = true
 							refreshLabel()
-							closePopup()
-							currentPopupCleanup = nil
+							closeCurrentPopup()
 							fire()
 						end
 					end)
 				end
 
-				catcher.MouseButton1Click:Connect(function()
-					closePopup()
-					currentPopupCleanup = nil
-				end)
+				catcher.MouseButton1Click:Connect(closeCurrentPopup)
 			end
 
 			holder.InputBegan:Connect(function(inp)
@@ -2829,14 +2828,8 @@ function Library:CreateWindow(cfg)
 					pcall(function() catcher:Destroy() end)
 					pcall(function() panel:Destroy() end)
 				end
-				doneBtn.MouseButton1Click:Connect(function()
-					closePopup()
-					currentPopupCleanup = nil
-				end)
-				catcher.MouseButton1Click:Connect(function()
-					closePopup()
-					currentPopupCleanup = nil
-				end)
+				doneBtn.MouseButton1Click:Connect(closeCurrentPopup)
+				catcher.MouseButton1Click:Connect(closeCurrentPopup)
 
 				-- Register with popup manager
 				openPopup(closePopup)
@@ -2887,7 +2880,7 @@ function Library:CreateWindow(cfg)
 
 	function Window:Destroy()
 		closeCurrentPopup()
-		table.clear(DragHandlers)
+		currentDrag = nil
 		table.clear(Keybinds)
 		WindowJanitor:Cleanup()
 	end

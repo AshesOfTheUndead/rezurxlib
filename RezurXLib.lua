@@ -1,33 +1,38 @@
 -- ============================================================
--- RezurXLib v1.0 — Rayfield-shaped UI Library (RezurXlab skin)
+-- RezurXLib v2.0 — Elite UI Library
 --
--- A callable UI library with the same API surface as Rayfield
--- (CreateWindow -> Window:CreateTab -> Tab:CreateButton({...}),
--- Window/Library, Flags, themes, functional keybinds,
--- multi-select dropdowns) but wearing the RezurXlab Admin Panel
--- visual language: aurora header, sliding tab-pill indicator,
--- glow strip shimmer, chip tabs, status bar.
+-- A complete, production-grade Roblox UI library with:
+--   • Rayfield-compatible API (CreateWindow → CreateTab → CreateButton)
+--   • Sirius-inspired visual polish (aurora header, sliding indicator)
+--   • Mobile-first: auto-scaling, touch-optimized drag, large tap targets
+--   • Full element set: Button, Toggle, Slider, Input, Dropdown,
+--     Keybind, ColorPicker (HSV), Paragraph, Label, Section, Divider
+--   • Named popup manager (no popup leaks)
+--   • Centralized drag router with movement thresholds
+--   • Unified hide/show/minimize state tracker
+--   • Global keybind dispatcher (one connection for all keybinds)
+--   • Theme system with live refreshers
+--   • Notification system with progress bars
+--   • Resize handle, floating restore icon, status bar drag
 --
--- Intentionally NOT included (this is game-owner admin UI, not
--- exploit tooling): no key system, no config-file persistence
--- via writefile, no remote script loading, no obfuscation or
--- anti-detection of any kind. Every callback is yours to wire
--- into your own server-validated RemoteEvents.
---
--- USAGE (ModuleScript):
+-- Usage:
 --   local Lib = require(path.to.RezurXLib)
 --   local Window = Lib:CreateWindow({
---       Name            = "Admin Panel",
---       Subtitle        = "Management Console · RezurXlab",
---       LoadingTitle    = "RezurX lab",
---       LoadingEnabled  = true,
---       Theme           = "Ember",             -- "Ember" | "Ocean" | "Crimson" | "Slate"
+--       Name = "My Panel",
+--       Subtitle = "v1.0",
+--       LoadingTitle = "Loading...",
+--       LoadingEnabled = true,
+--       Theme = "Ember",  -- Ember | Ocean | Crimson | Slate
 --       ToggleUIKeybind = Enum.KeyCode.K,
+--       Size = Vector2.new(460, 500),  -- optional
 --   })
 --   local Tab = Window:CreateTab("Main", "📊")
---   Tab:CreateButton({ Name = "Refresh", Callback = function() end })
---   See ExampleUsage.client.lua for the full element catalogue.
+--   Tab:CreateButton({ Name = "Click me", Callback = function() end })
 -- ============================================================
+
+-- ════════════════════════════════════════════════════════════
+-- SERVICES
+-- ════════════════════════════════════════════════════════════
 
 local Players          = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -39,27 +44,36 @@ local CoreGui          = game:GetService("CoreGui")
 local player    = Players.LocalPlayer
 local playerGui = player and player:WaitForChild("PlayerGui")
 
--- ============================================================
+-- ════════════════════════════════════════════════════════════
 -- TWEEN PRESETS
--- ============================================================
-local T10    = TweenInfo.new(0.10, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T15    = TweenInfo.new(0.15, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T20    = TweenInfo.new(0.20, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T50    = TweenInfo.new(0.50, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
-local TMIN   = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TTAB   = TweenInfo.new(0.34, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
+-- ════════════════════════════════════════════════════════════
+
+local T10   = TweenInfo.new(0.10, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
+local T15   = TweenInfo.new(0.15, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
+local T20   = TweenInfo.new(0.20, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
+local T50   = TweenInfo.new(0.50, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
+local TMIN  = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local TTAB  = TweenInfo.new(0.34, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
 local TPRESS = TweenInfo.new(0.09, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local TPOP   = TweenInfo.new(0.24, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
+local TPOP  = TweenInfo.new(0.24, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
 
--- ============================================================
+-- ════════════════════════════════════════════════════════════
 -- SHARED CORNER RADII
--- ============================================================
-local R = { outer = 20, panel = 12, control = 10, small = 7, pill = 6, tab = 9 }
+-- ════════════════════════════════════════════════════════════
 
--- ============================================================
--- THEMES — full token sets. "Ember" is the original RezurXlab
--- palette. Each theme must define every token.
--- ============================================================
+local R = {
+	outer   = 20,
+	panel   = 12,
+	control = 10,
+	small   = 7,
+	pill    = 6,
+	tab     = 9,
+}
+
+-- ════════════════════════════════════════════════════════════
+-- THEMES — each must define every token
+-- ════════════════════════════════════════════════════════════
+
 local Themes = {
 	Ember = {
 		bg        = Color3.fromRGB(8, 8, 13),
@@ -175,25 +189,29 @@ local Themes = {
 	},
 }
 
--- Active palette. Mutated in place by ApplyTheme so every
+-- Active palette — mutated in place by theme changes so every
 -- closure that captured `C` keeps reading fresh values.
 local C = {}
 for k, v in pairs(Themes.Ember) do C[k] = v end
 C.borderAcc = C.accent
 
--- ============================================================
--- JANITOR
--- ============================================================
+-- ════════════════════════════════════════════════════════════
+-- JANITOR — ordered cleanup of connections and instances
+-- ════════════════════════════════════════════════════════════
+
 local Janitor = {}
 Janitor.__index = Janitor
+
 function Janitor.new()
 	return setmetatable({ _items = {}, _n = 0 }, Janitor)
 end
+
 function Janitor:Add(obj, method)
 	self._n = self._n + 1
 	self._items[self._n] = { obj = obj, method = method or "Disconnect" }
 	return obj
 end
+
 function Janitor:Cleanup()
 	for i = self._n, 1, -1 do
 		local e = self._items[i]
@@ -201,10 +219,10 @@ function Janitor:Cleanup()
 			pcall(function()
 				if type(e.obj) == "function" then
 					e.obj()
+				elseif type(e.obj) == "Instance" then
+					e.obj:Destroy()
 				elseif e.obj[e.method] then
 					e.obj[e.method](e.obj)
-				elseif e.obj.Destroy then
-					e.obj:Destroy()
 				end
 			end)
 		end
@@ -213,11 +231,14 @@ function Janitor:Cleanup()
 	self._n = 0
 end
 
--- ============================================================
--- CENTRALIZED TWEEN MANAGER — cancels any in-flight tween on
--- the same instance/property before starting a new one.
--- ============================================================
+-- ════════════════════════════════════════════════════════════
+-- CENTRALIZED TWEEN MANAGER
+-- Cancels any in-flight tween on the same instance/property before
+-- starting a new one, preventing visual glitches from overlapping.
+-- ════════════════════════════════════════════════════════════
+
 local _tweens = setmetatable({}, { __mode = "k" })
+
 local function Tween(inst, info, props)
 	if not inst or not inst.Parent then return nil end
 	if _tweens[inst] then
@@ -246,15 +267,17 @@ local function Tween(inst, info, props)
 	return tw
 end
 
--- ============================================================
+-- ════════════════════════════════════════════════════════════
 -- BASIC BUILDER HELPERS
--- ============================================================
+-- ════════════════════════════════════════════════════════════
+
 local function corner(p, r)
 	local c = Instance.new("UICorner")
 	c.CornerRadius = (type(r) == "number") and UDim.new(0, r) or (r or UDim.new(0, R.panel))
 	c.Parent = p
 	return c
 end
+
 local function stroke(p, col, thick)
 	local s = Instance.new("UIStroke")
 	s.Color = col or C.border
@@ -263,6 +286,7 @@ local function stroke(p, col, thick)
 	s.Parent = p
 	return s
 end
+
 local function pad(p, t, b, l, r)
 	local u = Instance.new("UIPadding")
 	u.PaddingTop = UDim.new(0, t or 0)
@@ -272,6 +296,7 @@ local function pad(p, t, b, l, r)
 	u.Parent = p
 	return u
 end
+
 local function gradient(p, colorSeq, rot)
 	local g = Instance.new("UIGradient")
 	g.Color = colorSeq
@@ -282,39 +307,44 @@ end
 
 local function keyName(keyCode)
 	if keyCode == nil then return "None" end
-	local n = keyCode.Name
-	return n
+	return keyCode.Name
 end
 
--- ============================================================
+-- ════════════════════════════════════════════════════════════
 -- LIBRARY ROOT
--- ============================================================
-local Library = {}
-Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "1.0.0"
-Library._windows = {}
+-- ════════════════════════════════════════════════════════════
 
--- ============================================================
+local Library = {}
+Library.Flags    = {}
+Library.Version  = "2.0.0"
+Library._windows = {}
+Library._lastWindow = nil
+
+-- ════════════════════════════════════════════════════════════
 -- CreateWindow
--- ============================================================
+-- ════════════════════════════════════════════════════════════
+
 function Library:CreateWindow(cfg)
 	cfg = cfg or {}
+
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- Config parsing with validation
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local windowName   = cfg.Name or "RezurXlab Panel"
 	local subtitle     = cfg.Subtitle or "Management Console · RezurXlab"
 	local loadingTitle = cfg.LoadingTitle or windowName
 	local loadingOn    = cfg.LoadingEnabled ~= false
 	local toggleKey    = cfg.ToggleUIKeybind or Enum.KeyCode.K
-	local WIN_W        = (cfg.Size and cfg.Size.X) or 460  -- bigger (was 420)
-	local WIN_H        = (cfg.Size and cfg.Size.Y) or 500  -- bigger (was 480)
-	local MIN_W, MIN_H = 300, 360  -- minimum resizable size
-	local MAX_W, MAX_H = 900, 900  -- maximum resizable size
+	local WIN_W        = (cfg.Size and cfg.Size.X) or 460
+	local WIN_H        = (cfg.Size and cfg.Size.Y) or 500
+	local MIN_W, MIN_H = 300, 360
+	local MAX_W, MAX_H = 900, 900
 
-	-- ------------------------------------------------------------
-	-- IDEMPOTENT GUARD — keyed to THIS window's name, so re-running
-	-- a script that creates "Admin Panel" replaces the old "Admin
-	-- Panel" instead of stacking a duplicate, without touching any
-	-- other windows the library may be running.
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- IDEMPOTENT GUARD — replace existing window with same name
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local PANEL_NAME = "RezurX_" .. windowName:gsub("%W", "")
 	for _, container in ipairs({ CoreGui, playerGui }) do
 		local ok, existing = pcall(function() return container:FindFirstChild(PANEL_NAME) end)
@@ -332,31 +362,59 @@ function Library:CreateWindow(cfg)
 	Window.Name = windowName
 	local WindowJanitor = Janitor.new()
 
-	-- Theme refreshers: each stateful element registers a closure
-	-- that re-applies its colors from `C` for its current state.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- Theme refresher system — each stateful element registers a
+	-- closure that re-applies its colors from `C` for its state.
 	-- Gradients can't be tweened, so they're updated directly.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local ThemeRefreshers = {}
 	local function onTheme(fn)
 		table.insert(ThemeRefreshers, fn)
 		return fn
 	end
 
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- SHARED DRAG ROUTER — one global InputChanged/InputEnded pair
 	-- dispatching to whichever control is mid-drag.
-	-- ------------------------------------------------------------
+	--
+	-- Supports movement thresholds: if threshold > 0, the moveFn
+	-- won't fire until the pointer has moved more than threshold
+	-- pixels from the start position. This prevents accidental
+	-- drags on tap.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local DragHandlers = {}
-	local function registerDrag(key, moveFn, onEndFn)
-		DragHandlers[key] = { move = moveFn, onEnd = onEndFn }
+	local function registerDrag(key, moveFn, onEndFn, threshold)
+		DragHandlers[key] = {
+			move      = moveFn,
+			onEnd     = onEndFn,
+			threshold = threshold or 0,
+			startPos  = nil,
+			armed     = false,
+		}
 	end
+
 	WindowJanitor:Add(UserInputService.InputChanged:Connect(function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseMovement
 			or inp.UserInputType == Enum.UserInputType.Touch then
 			for _, h in pairs(DragHandlers) do
-				if h.move then h.move(inp.Position) end
+				if h.move then
+					if h.threshold > 0 and not h.armed then
+						if not h.startPos then
+							h.startPos = inp.Position
+						elseif (inp.Position - h.startPos).Magnitude >= h.threshold then
+							h.armed = true
+						end
+					end
+					if h.threshold == 0 or h.armed then
+						pcall(h.move, inp.Position)
+					end
+				end
 			end
 		end
 	end))
+
 	WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1
 			or inp.UserInputType == Enum.UserInputType.Touch then
@@ -366,6 +424,10 @@ function Library:CreateWindow(cfg)
 			table.clear(DragHandlers)
 		end
 	end))
+
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- Ripple effect helper
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 	local function ripple(parent, posX, posY, col)
 		local rp = Instance.new("Frame")
@@ -384,9 +446,13 @@ function Library:CreateWindow(cfg)
 		if t then t.Completed:Connect(function() rp:Destroy() end) else rp:Destroy() end
 	end
 
-	-- ------------------------------------------------------------
-	-- SCREEN GUI
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- SCREEN GUI + UIScale
+	--
+	-- [BUGFIX] UIScale is created BEFORE updateScale() is called,
+	-- so the first scale application doesn't fail silently.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local screenGui = Instance.new("ScreenGui")
 	screenGui.Name = PANEL_NAME
 	screenGui.ResetOnSpawn = false
@@ -396,36 +462,39 @@ function Library:CreateWindow(cfg)
 	if not screenGui.Parent then screenGui.Parent = playerGui end
 	WindowJanitor:Add(screenGui)
 
-	-- ═══ AUTO SCALE (mobile friendly) ═══
+	local uiScale = Instance.new("UIScale")
+	uiScale.Scale = 1
+	uiScale.Parent = screenGui
+
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- AUTO SCALE (mobile friendly)
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local function getViewport()
 		local cam = workspace.CurrentCamera
 		return cam and cam.ViewportSize or Vector2.new(1920, 1080)
 	end
+
 	local function updateScale()
 		local vp = getViewport()
-		-- Mobile-friendly: leave room for top status bar + bottom controls
 		local scaleX = (vp.X - 16) / WIN_W
 		local scaleY = (vp.Y - 120) / WIN_H
-		-- Allow shrinking down to 0.35 on small phones (was 0.5 — too big)
-		local scale = math.clamp(math.min(scaleX, scaleY), 0.5, 1.0)  -- [FIX] floor 0.5 (was 0.4)
-		if screenGui:FindFirstChild("UIScale") then
-			screenGui.UIScale.Scale = scale
-		end
+		local scale = math.clamp(math.min(scaleX, scaleY), 0.5, 1.0)
+		uiScale.Scale = scale
 	end
+
 	updateScale()
 	WindowJanitor:Add(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale))
-	local uiScale = Instance.new("UIScale")
-	uiScale.Scale = 1
-	uiScale.Parent = screenGui
-	-- [FIX] Re-apply scale after delay — camera viewport may not be ready at script start
+	-- Re-apply after delays — camera viewport may not be ready at script start
 	task.delay(0.3, updateScale)
 	task.delay(1.0, updateScale)
 
 	local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 24
 
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- SHADOW + OUTER WINDOW
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local shadow = Instance.new("Frame")
 	shadow.Name = "Shadow"
 	shadow.Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36)
@@ -462,8 +531,10 @@ function Library:CreateWindow(cfg)
 	body.ZIndex = 2
 	body.Parent = frame
 
-	-- Glow strip under the header — gradient refs captured for the
-	-- theme system (gradients need direct updates, not re-creation).
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- GLOW STRIP — accent line under header with shimmer animation
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local glowStrip = Instance.new("Frame")
 	glowStrip.Size = UDim2.new(1, 0, 0, 3)
 	glowStrip.Position = UDim2.new(0, 0, 0, HEADER_H - 3)
@@ -484,6 +555,8 @@ function Library:CreateWindow(cfg)
 			ColorSequenceKeypoint.new(1.0, C.accentDim),
 		}
 	end)
+
+	-- Shimmer animation — moves a white highlight across the glow strip
 	task.spawn(function()
 		local shimmer = Instance.new("Frame")
 		shimmer.Size = UDim2.new(0, 60, 1, 0)
@@ -500,9 +573,10 @@ function Library:CreateWindow(cfg)
 		end
 	end)
 
-	-- ------------------------------------------------------------
-	-- HEADER
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- HEADER — logo, subtitle, FPS/ping chip
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local header = Instance.new("Frame")
 	header.Size = UDim2.new(1, 0, 0, HEADER_H)
 	header.BackgroundColor3 = C.headerA
@@ -529,6 +603,7 @@ function Library:CreateWindow(cfg)
 	accentLine.BorderSizePixel = 0
 	accentLine.Parent = header
 
+	-- Pulsing logo glow
 	local logoGlow = Instance.new("Frame")
 	logoGlow.Size = UDim2.new(0, 70, 0, 70)
 	logoGlow.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -557,6 +632,8 @@ function Library:CreateWindow(cfg)
 			ColorSequenceKeypoint.new(1.0, C.headerA),
 		}
 	end)
+
+	-- Pulsing animation for logo glow
 	task.spawn(function()
 		while header.Parent do
 			Tween(logoGlow, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
@@ -599,7 +676,10 @@ function Library:CreateWindow(cfg)
 		Tween(subLbl, T20, { TextColor3 = C.muted })
 	end)
 
-	-- FPS / PING chip
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- FPS / PING CHIP
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local statFrame = Instance.new("Frame")
 	statFrame.Size = UDim2.new(0, 118, 0, 26)
 	statFrame.Position = UDim2.new(1, -206, 0.5, -13)
@@ -644,6 +724,7 @@ function Library:CreateWindow(cfg)
 		Tween(statDivider, T20, { BackgroundColor3 = C.border })
 	end)
 
+	-- FPS counter — exponential moving average
 	local fpsAvg = 60
 	WindowJanitor:Add(RunService.Heartbeat:Connect(function(dt)
 		fpsAvg = fpsAvg * 0.88 + (1 / math.max(dt, 0.001)) * 0.12
@@ -651,6 +732,8 @@ function Library:CreateWindow(cfg)
 		fpsLabel.Text = avg .. " FPS"
 		fpsLabel.TextColor3 = avg >= 55 and C.green or avg >= 30 and C.yellow or C.red
 	end))
+
+	-- Ping counter — polls every 1 second
 	task.spawn(function()
 		while screenGui.Parent do
 			local ok, ms = pcall(function()
@@ -668,11 +751,14 @@ function Library:CreateWindow(cfg)
 		end
 	end)
 
-	-- MINIMIZE + HIDE buttons
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- MINIMIZE BUTTON
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local minBtn = Instance.new("TextButton")
 	minBtn.Text = ""
 	minBtn.Size = UDim2.new(0, 38, 0, 32)
-	minBtn.Position = UDim2.new(1, -86, 0.5, -14)
+	minBtn.Position = UDim2.new(1, -86, 0.5, -16)
 	minBtn.BackgroundColor3 = C.panelAlt
 	minBtn.BorderSizePixel = 0
 	minBtn.AutoButtonColor = false
@@ -704,37 +790,17 @@ function Library:CreateWindow(cfg)
 		Tween(minStroke, T20, { Color = C.border })
 	end)
 
-	-- MINIMIZE LOGIC
-	local minimized = false
-	minBtn.Activated:Connect(function()
-		minimized = not minimized
-		if minimized then
-			tabBar.Visible = false
-			content.Visible = false
-			statusBar.Visible = false
-			Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, HEADER_H) })
-			Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, 0) })
-			Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 36, 0, HEADER_H + 36) })
-			Tween(minGlyph, T20, { Rotation = 180 })
-		else
-			tabBar.Visible = true
-			content.Visible = true
-			statusBar.Visible = true
-			-- [FIX] recompute body height from current WIN_H (supports resize)
-			Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
-			Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, WIN_H - HEADER_H) })
-			Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36) })
-			Tween(minGlyph, T20, { Rotation = 0 })
-		end
-	end)
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- CLOSE BUTTON
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 	local closeBtn = Instance.new("TextButton")
 	closeBtn.Text = "✕"
 	closeBtn.Size = UDim2.new(0, 38, 0, 32)
-	closeBtn.Position = UDim2.new(1, -44, 0.5, -14)
+	closeBtn.Position = UDim2.new(1, -44, 0.5, -16)
 	closeBtn.BackgroundColor3 = C.red
 	closeBtn.TextColor3 = C.white
-	closeBtn.TextSize = 12
+	closeBtn.TextSize = 14
 	closeBtn.Font = Enum.Font.GothamBold
 	closeBtn.BorderSizePixel = 0
 	closeBtn.AutoButtonColor = false
@@ -748,7 +814,10 @@ function Library:CreateWindow(cfg)
 		Tween(closeBtn, T10, { BackgroundColor3 = C.red })
 	end)
 
-	-- ═══ FLOATING RESTORE ICON ═══
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- FLOATING RESTORE ICON — shown when window is hidden via X
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local floatIcon = Instance.new("TextButton")
 	floatIcon.Name = "FloatIcon"
 	floatIcon.Size = UDim2.new(0, 52, 0, 52)
@@ -756,7 +825,7 @@ function Library:CreateWindow(cfg)
 	floatIcon.BackgroundColor3 = C.accent
 	floatIcon.Text = "👑"
 	floatIcon.Font = Enum.Font.GothamBold
-	floatIcon.TextSize = 20
+	floatIcon.TextSize = 24
 	floatIcon.TextColor3 = C.white
 	floatIcon.AutoButtonColor = false
 	floatIcon.BorderSizePixel = 0
@@ -765,40 +834,36 @@ function Library:CreateWindow(cfg)
 	floatIcon.Parent = screenGui
 	corner(floatIcon, UDim.new(1, 0))
 	stroke(floatIcon, C.white, 2)
-	-- [FIX] Track movement so tap (restore) vs drag (move) is distinguished
+
+	-- Float icon drag — with movement threshold to distinguish
+	-- tap (restore) from drag (move)
 	local floatDragMoved = false
 	floatIcon.InputBegan:Connect(function(inp)
-		if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+		if inp.UserInputType == Enum.UserInputType.MouseButton1
+			or inp.UserInputType == Enum.UserInputType.Touch then
 			local startDrag = inp.Position
-			local startAbs = floatIcon.AbsolutePosition  -- [FIX] screen pixels
+			local startAbs = floatIcon.AbsolutePosition
 			floatDragMoved = false
 			local vp = getViewport()
 			registerDrag("floatIcon", function(pos)
 				local d = pos - startDrag
-				if d.Magnitude > 6 then floatDragMoved = true end  -- threshold
-				local nx = math.clamp(startAbs.X + d.X, 0, vp.X - 44)
-				local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 44)
+				if d.Magnitude > 6 then floatDragMoved = true end
+				local nx = math.clamp(startAbs.X + d.X, 0, vp.X - 52)
+				local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 52)
 				floatIcon.Position = UDim2.new(0, nx, 0, ny)
 			end)
 		end
 	end)
+
 	floatIcon.Activated:Connect(function()
-		if floatDragMoved then return end  -- [FIX] was a drag, not a tap
-		floatIcon.Visible = false
-		frame.Visible = true
-		shadow.Visible = true
-		if not minimized then
-			tabBar.Visible = true
-			content.Visible = true
-			statusBar.Visible = true
-		end
+		if floatDragMoved then return end -- was a drag, not a tap
+		Window:SetHidden(false)
 	end)
 
-	-- ------------------------------------------------------------
-	-- WINDOW DRAG (via shared drag router)
-	-- [FIX] Use dedicated dragBar instead of header.InputBegan
-	-- to prevent drag from firing when clicking minBtn/closeBtn
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- WINDOW DRAG BAR — covers header area except min/close buttons
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local dragBar = Instance.new("TextButton")
 	dragBar.Name = "DragBar"
 	dragBar.Size = UDim2.new(1, -96, 1, 0)
@@ -807,9 +872,7 @@ function Library:CreateWindow(cfg)
 	dragBar.Text = ""
 	dragBar.AutoButtonColor = false
 	dragBar.BorderSizePixel = 0
-	-- [FIX] ZIndex 6 = above logoGlow(4), statFrame(5), logo(5), subLbl(5)
-	-- but dragBar ends 80px before right edge, so minBtn/closeBtn stay tappable
-	dragBar.ZIndex = 6
+	dragBar.ZIndex = 6 -- above logo/statFrame, below min/close
 	dragBar.Active = true
 	dragBar.Selectable = false
 	dragBar.Parent = header
@@ -818,11 +881,10 @@ function Library:CreateWindow(cfg)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1
 			or inp.UserInputType == Enum.UserInputType.Touch then
 			local dragStart = inp.Position
-			-- [FIX] Use AbsolutePosition (screen pixels) not Position.Offset
-			-- Position has scale 0.5/0.55, .Offset gives -WIN_W/2 → flinging
 			local startAbs = frame.AbsolutePosition
 			Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-			local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+			local vp = getViewport()
+			-- Threshold of 3px prevents accidental drags on tap
 			registerDrag("window", function(pos)
 				local d = pos - dragStart
 				local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
@@ -831,13 +893,14 @@ function Library:CreateWindow(cfg)
 				shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
 			end, function()
 				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-			end)
+			end, 3)
 		end
 	end))
 
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- TAB BAR + SLIDING INDICATOR
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local tabBar = Instance.new("ScrollingFrame")
 	tabBar.Size = UDim2.new(1, 0, 0, TABBAR_H)
 	tabBar.BackgroundColor3 = C.tabBarBg
@@ -855,7 +918,7 @@ function Library:CreateWindow(cfg)
 
 	local tabIndicator = Instance.new("Frame")
 	tabIndicator.Name = "ActiveIndicator"
-	tabIndicator.Size = UDim2.new(0, 70, 0, TABBAR_H - 10)
+	tabIndicator.Size = UDim2.new(0, 90, 0, TABBAR_H - 10)
 	tabIndicator.Position = UDim2.new(0, 4, 0, 5)
 	tabIndicator.BackgroundColor3 = C.accentDark
 	tabIndicator.BorderSizePixel = 0
@@ -879,6 +942,7 @@ function Library:CreateWindow(cfg)
 		}
 	end)
 
+	-- Shimmer on the active tab indicator
 	local tabShimmer = Instance.new("Frame")
 	tabShimmer.Size = UDim2.new(0, 26, 1, 0)
 	tabShimmer.BackgroundColor3 = C.white
@@ -906,9 +970,10 @@ function Library:CreateWindow(cfg)
 	tabLayout.Parent = tabBar
 	pad(tabBar, 0, 0, 5, 5)
 
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- CONTENT + STATUS BAR
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local content = Instance.new("Frame")
 	content.Size = UDim2.new(1, 0, 1, -(TABBAR_H + STATUSBAR_H))
 	content.Position = UDim2.new(0, 0, 0, TABBAR_H)
@@ -941,6 +1006,7 @@ function Library:CreateWindow(cfg)
 		Tween(sbTopLine, T20, { BackgroundColor3 = C.border })
 	end)
 
+	-- Status bar green dot — pulsing "ready" indicator
 	local sDot = Instance.new("Frame")
 	sDot.Size = UDim2.new(0, 7, 0, 7)
 	sDot.Position = UDim2.new(0, 12, 0.5, -3)
@@ -961,6 +1027,7 @@ function Library:CreateWindow(cfg)
 		end
 	end)
 
+	-- Status bar uptime text
 	local sTxt = Instance.new("TextLabel")
 	sTxt.AutomaticSize = Enum.AutomaticSize.X
 	sTxt.Size = UDim2.new(0, 0, 0, 14)
@@ -982,6 +1049,7 @@ function Library:CreateWindow(cfg)
 		end
 	end)
 
+	-- Status bar version text
 	local sVer = Instance.new("TextLabel")
 	sVer.AutomaticSize = Enum.AutomaticSize.X
 	sVer.Size = UDim2.new(0, 0, 0, 14)
@@ -1001,27 +1069,33 @@ function Library:CreateWindow(cfg)
 		Tween(sVer, T20, { TextColor3 = C.muted })
 	end)
 
-	-- [FIX] Make status bar draggable (move window from bottom too)
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- STATUS BAR DRAG — move window from bottom too
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	WindowJanitor:Add(statusBar.InputBegan:Connect(function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1
 			or inp.UserInputType == Enum.UserInputType.Touch then
-		local dragStart = inp.Position
-		local startAbs = frame.AbsolutePosition  -- [FIX] screen pixels
-		Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-		local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-		registerDrag("statusbar", function(pos)
-			local d = pos - dragStart
-			local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
-			local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 30)
-			frame.Position = UDim2.new(0, nx, 0, ny)
-			shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
-		end, function()
-			Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-		end)
+			local dragStart = inp.Position
+			local startAbs = frame.AbsolutePosition
+			Tween(shadow, T15, { BackgroundTransparency = 0.65 })
+			local vp = getViewport()
+			registerDrag("statusbar", function(pos)
+				local d = pos - dragStart
+				local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
+				local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 30)
+				frame.Position = UDim2.new(0, nx, 0, ny)
+				shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
+			end, function()
+				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
+			end, 3)
 		end
 	end))
 
-	-- [FIX] Resize handle (bottom-right corner) — drag to resize window
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- RESIZE HANDLE — bottom-right corner, drag to resize
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local resizeHandle = Instance.new("TextButton")
 	resizeHandle.Name = "ResizeHandle"
 	resizeHandle.Size = UDim2.new(0, 22, 0, 22)
@@ -1049,28 +1123,27 @@ function Library:CreateWindow(cfg)
 	WindowJanitor:Add(resizeHandle.InputBegan:Connect(function(inp)
 		if inp.UserInputType == Enum.UserInputType.MouseButton1
 			or inp.UserInputType == Enum.UserInputType.Touch then
-		-- Lock top-left corner: record it in absolute pixels, resize from there
-		local topLeft = frame.AbsolutePosition
-		local dragStart = inp.Position
-		local startW, startH = WIN_W, WIN_H
-		Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-		registerDrag("resize", function(pos)
-			local d = pos - dragStart
-			local newW = math.clamp(startW + d.X, MIN_W, MAX_W)
-			local newH = math.clamp(startH + d.Y, MIN_H, MAX_H)
-			WIN_W = newW
-			WIN_H = newH
-			frame.Position = UDim2.new(0, topLeft.X, 0, topLeft.Y)
-			frame.Size = UDim2.new(0, newW, 0, newH)
-			shadow.Position = UDim2.new(0, topLeft.X - 18, 0, topLeft.Y - 18)
-			shadow.Size = UDim2.new(0, newW + 36, 0, newH + 36)
-			if not minimized then
-				body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
-			end
-			updateScale()
-		end, function()
-			Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-		end)
+			local topLeft = frame.AbsolutePosition
+			local dragStart = inp.Position
+			local startW, startH = WIN_W, WIN_H
+			Tween(shadow, T15, { BackgroundTransparency = 0.65 })
+			registerDrag("resize", function(pos)
+				local d = pos - dragStart
+				local newW = math.clamp(startW + d.X, MIN_W, MAX_W)
+				local newH = math.clamp(startH + d.Y, MIN_H, MAX_H)
+				WIN_W = newW
+				WIN_H = newH
+				frame.Position = UDim2.new(0, topLeft.X, 0, topLeft.Y)
+				frame.Size = UDim2.new(0, newW, 0, newH)
+				shadow.Position = UDim2.new(0, topLeft.X - 18, 0, topLeft.Y - 18)
+				shadow.Size = UDim2.new(0, newW + 36, 0, newH + 36)
+				if not Window._minimized then
+					body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
+				end
+				updateScale()
+			end, function()
+				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
+			end)
 		end
 	end))
 	onTheme(function()
@@ -1078,20 +1151,33 @@ function Library:CreateWindow(cfg)
 		Tween(resizeStroke, T20, { Color = C.border })
 	end)
 
-	-- ------------------------------------------------------------
-	-- POPUP MANAGER
-	-- ------------------------------------------------------------
-	local currentPopupJanitor = nil
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- POPUP MANAGER — single open/close for all popup types
+	-- (dropdowns, color pickers, keybind rebind catchers)
+	--
+	-- [BUGFIX] All popups now go through this single manager,
+	-- so opening one popup automatically closes the previous.
+	-- No more stuck overlays.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
+	local currentPopupCleanup = nil
+
 	local function closeCurrentPopup()
-		if currentPopupJanitor then
-			currentPopupJanitor:Cleanup()
-			currentPopupJanitor = nil
+		if currentPopupCleanup then
+			pcall(currentPopupCleanup)
+			currentPopupCleanup = nil
 		end
 	end
 
-	-- ------------------------------------------------------------
+	local function openPopup(cleanupFn)
+		closeCurrentPopup()
+		currentPopupCleanup = cleanupFn
+	end
+
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- NOTIFICATIONS
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local notifContainer = Instance.new("Frame")
 	notifContainer.Size = UDim2.new(0, 300, 1, -20)
 	notifContainer.Position = UDim2.new(1, -308, 0, 10)
@@ -1206,38 +1292,81 @@ function Library:CreateWindow(cfg)
 		return n
 	end
 
-	-- Rayfield-style: Window:Notify({Title, Content, Duration, Type})
 	function Window:Notify(ncfg)
 		ncfg = ncfg or {}
 		return notify(ncfg.Title, ncfg.Content, ncfg.Duration, ncfg.Type)
 	end
 
-	-- ------------------------------------------------------------
-	-- ------------------------------------------------------------
-	-- HIDE / SHOW / MINIMIZE / TOGGLE KEYBIND
-	-- ------------------------------------------------------------
-	local hidden = false
-	local function setHidden(h)
-		hidden = h
-		frame.Visible = not h
-		shadow.Visible = not h
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- HIDE / SHOW / MINIMIZE STATE TRACKER
+	--
+	-- [BUGFIX] Single source of truth for visibility state.
+	-- Close button, toggle key, and float icon all go through
+	-- SetHidden, so `hidden` never desyncs from reality.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
+	Window._hidden = false
+	Window._minimized = false
+
+	function Window:SetHidden(h)
+		self._hidden = h
+		if h then
+			frame.Visible = false
+			shadow.Visible = false
+			floatIcon.Visible = true
+		else
+			frame.Visible = true
+			shadow.Visible = true
+			floatIcon.Visible = false
+		end
 	end
+
+	function Window:IsHidden()
+		return self._hidden
+	end
+
+	-- Close button — uses SetHidden, not direct visibility manipulation
 	closeBtn.Activated:Connect(function()
 		closeCurrentPopup()
-		frame.Visible = false
-		shadow.Visible = false
-		floatIcon.Visible = true
+		Window:SetHidden(true)
 	end)
+
+	-- Minimize button — closes popups, animates to header-only
+	minBtn.Activated:Connect(function()
+		closeCurrentPopup()
+		Window._minimized = not Window._minimized
+		if Window._minimized then
+			tabBar.Visible = false
+			content.Visible = false
+			statusBar.Visible = false
+			Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, HEADER_H) })
+			Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, 0) })
+			Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 36, 0, HEADER_H + 36) })
+			Tween(minGlyph, T20, { Rotation = 180 })
+		else
+			tabBar.Visible = true
+			content.Visible = true
+			statusBar.Visible = true
+			Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
+			Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, WIN_H - HEADER_H) })
+			Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36) })
+			Tween(minGlyph, T20, { Rotation = 0 })
+		end
+	end)
+
+	-- Toggle keybind
 	WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
 		if gp then return end
 		if inp.KeyCode == toggleKey and not UserInputService:GetFocusedTextBox() then
-			setHidden(not hidden)
+			Window:SetHidden(not Window._hidden)
 		end
 	end))
 
-	-- LOADING OVERLAY — contained inside `body` (never full-screen),
-	-- pcall-wrapped, hard watchdog. Header stays live from frame one.
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- LOADING OVERLAY — contained inside body, pcall-wrapped,
+	-- hard watchdog timer
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	if loadingOn then
 		local loadingOverlay = Instance.new("Frame")
 		loadingOverlay.Name = "LoadingOverlay"
@@ -1319,9 +1448,10 @@ function Library:CreateWindow(cfg)
 		end)
 	end
 
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- THEME API
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	function Window:ModifyTheme(theme)
 		local set = (type(theme) == "table") and theme or Themes[theme]
 		if not set then
@@ -1335,16 +1465,77 @@ function Library:CreateWindow(cfg)
 		end
 	end
 
-	-- ============================================================
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+	-- GLOBAL KEYBIND DISPATCHER
+	--
+	-- [BUGFIX] Single InputBegan connection for ALL keybinds,
+	-- instead of one per keybind element.
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
+	local Keybinds = {} -- array of { bound, hold, callback, listening, pill, pillStroke, accentDark, accentDim, panelHov, accent }
+
+	WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
+		-- Check if any keybind is in rebind-listening mode
+		local anyListening = false
+		for _, kb in ipairs(Keybinds) do
+			if kb.listening then
+				anyListening = true
+				if inp.UserInputType == Enum.UserInputType.Keyboard then
+					if inp.KeyCode == Enum.KeyCode.Escape then
+						kb.stopListening(nil)
+					else
+						kb.stopListening(inp.KeyCode)
+					end
+				end
+				return
+			end
+		end
+
+		if anyListening then return end
+		if gp then return end
+
+		-- Dispatch to all bound keybinds
+		if inp.UserInputType == Enum.UserInputType.Keyboard then
+			for _, kb in ipairs(Keybinds) do
+				if kb.bound and inp.KeyCode == kb.bound and not UserInputService:GetFocusedTextBox() then
+					Tween(kb.pill, TPRESS, { BackgroundColor3 = C.accentDim })
+					task.delay(0.12, function()
+						if not kb.listening then
+							Tween(kb.pill, T15, { BackgroundColor3 = C.accentDark })
+						end
+					end)
+					if kb.callback then
+						if kb.hold then
+							pcall(kb.callback, true)
+						else
+							pcall(kb.callback)
+						end
+					end
+				end
+			end
+		end
+	end))
+
+	WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
+		for _, kb in ipairs(Keybinds) do
+			if kb.hold and kb.bound and inp.KeyCode == kb.bound and not kb.listening then
+				if kb.callback then pcall(kb.callback, false) end
+			end
+		end
+	end))
+
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- CreateTab
-	-- ============================================================
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	local Tabs = {}
 	local ActiveTab = nil
 
 	local function moveIndicatorTo(btn, animated)
 		local w = btn.AbsoluteSize.X
-		-- [FIX] Use absolute position relative to tabBar
+		if w <= 0 then w = 90 end -- fallback before layout
 		local relX = btn.AbsolutePosition.X - tabBar.AbsolutePosition.X
+		if relX < 0 then relX = btn.Position.X.Offset end -- fallback
 		local goal = UDim2.new(0, relX, 0, tabIndicator.Position.Y.Offset)
 		local goalSize = UDim2.new(0, w, 0, tabIndicator.Size.Y.Offset)
 		if animated then
@@ -1358,10 +1549,13 @@ function Library:CreateWindow(cfg)
 	function Window:CreateTab(name, icon)
 		local tab = {}
 
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		-- TAB BUTTON — uses btn.Text directly (Sirius/Rayfield style)
+		-- No child labels = no rendering issues on mobile
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 		local btn = Instance.new("TextButton")
 		btn.Name = "TabChip"
-		-- [FIX] Use btn.Text directly for icon+text (Sirius/Rayfield style).
-		-- Child labels had rendering issues on some devices → blank tabs.
 		btn.Size = UDim2.new(0, 90, 1, -10)
 		btn.Position = UDim2.new(0, 0, 0, 5)
 		btn.BackgroundColor3 = C.tabChip
@@ -1375,9 +1569,10 @@ function Library:CreateWindow(cfg)
 		btn.Parent = tabBar
 		corner(btn, R.tab)
 		local chipStroke = stroke(btn, C.borderAcc, 1)
-		-- Keep refs for setActive color tweens
-		local iconLbl = btn  -- alias so setActive code works
-		local textLbl = btn  -- alias so setActive code works
+
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		-- PAGE — scrolling frame for tab content
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 		local page = Instance.new("ScrollingFrame")
 		page.Size = UDim2.new(1, 0, 1, 0)
@@ -1391,10 +1586,10 @@ function Library:CreateWindow(cfg)
 		page.Parent = content
 
 		local pLayout = Instance.new("UIListLayout")
-		pLayout.Padding = UDim.new(0, 8)  -- [FIX] 8px between items (was 6, cramped)
+		pLayout.Padding = UDim.new(0, 8)
 		pLayout.SortOrder = Enum.SortOrder.LayoutOrder
 		pLayout.Parent = page
-		pad(page, 12, 12, 11, 12)  -- [FIX] 12px page padding (was 10)
+		pad(page, 12, 12, 11, 12)
 		pLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 			page.CanvasSize = UDim2.new(0, 0, 0, pLayout.AbsoluteContentSize.Y + 20)
 		end)
@@ -1402,14 +1597,11 @@ function Library:CreateWindow(cfg)
 		tab.Page = page
 		tab.Btn = btn
 		tab.Name = name
+		tab._chipStroke = chipStroke
 
-			-- [FIX] updateBtnSize removed — btn uses AutomaticSize.X now
-			-- Just move the indicator to the btn's current position on load
-			task.defer(function()
-				if ActiveTab == tab then
-					moveIndicatorTo(btn, false)
-				end
-		end)
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		-- SET ACTIVE — switches to this tab
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 		local function setActive(skipAnim)
 			closeCurrentPopup()
@@ -1419,21 +1611,20 @@ function Library:CreateWindow(cfg)
 				prev.Btn.BackgroundTransparency = 0
 				Tween(prev.Btn, T20, { BackgroundColor3 = C.tabChip })
 				Tween(prev._chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
-				Tween(prev._iconLbl, T20, { TextColor3 = C.textDim })
+				Tween(prev.Btn, T20, { TextColor3 = C.textDim })
 			end
 			ActiveTab = tab
 			tab.Page.Visible = true
 			Tween(btn, T20, { BackgroundTransparency = 1 })
 			Tween(chipStroke, T20, { Transparency = 1 })
-			Tween(iconLbl, T20, { TextColor3 = C.accentHi })
+			Tween(btn, T20, { TextColor3 = C.accentHi })
 			moveIndicatorTo(btn, not skipAnim)
-			-- [FIX] Removed rotation/pop animation (was for separate icon label,
-			-- now iconLbl=btn so rotating would rotate the whole button)
 		end
-		tab._chipStroke = chipStroke
-		tab._iconLbl = iconLbl
-		tab._textLbl = textLbl
 		tab._setActive = setActive
+
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		-- TAB HOVER / CLICK
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 		onTheme(function()
 			page.ScrollBarImageColor3 = C.accent
@@ -1467,12 +1658,19 @@ function Library:CreateWindow(cfg)
 
 		table.insert(Tabs, tab)
 		if #Tabs == 1 then
-			task.defer(function() setActive(true) end)
+			-- Use RenderStepped:Wait() to ensure layout is computed
+			-- before positioning the indicator
+			task.spawn(function()
+				RunService.RenderStepped:Wait()
+				RunService.RenderStepped:Wait()
+				setActive(true)
+			end)
 		end
 
-		-- ========================================================
-		-- SHARED ELEMENT SCAFFOLD — panel holder with themed stroke
-		-- ========================================================
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+		-- SHARED ELEMENT SCAFFOLD
+		-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 		local function makeHolder(h)
 			local holder = Instance.new("Frame")
 			holder.Size = UDim2.new(1, 0, 0, h)
@@ -1489,7 +1687,7 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateSection / CreateDivider / CreateLabel / CreateParagraph
+		-- CreateSection
 		-- ========================================================
 		function tab:CreateSection(text)
 			local l = Instance.new("TextLabel")
@@ -1507,6 +1705,9 @@ function Library:CreateWindow(cfg)
 			return obj
 		end
 
+		-- ========================================================
+		-- CreateDivider
+		-- ========================================================
 		function tab:CreateDivider(text)
 			local holder = Instance.new("Frame")
 			holder.Size = UDim2.new(1, 0, 0, 20)
@@ -1535,6 +1736,9 @@ function Library:CreateWindow(cfg)
 			return holder
 		end
 
+		-- ========================================================
+		-- CreateLabel
+		-- ========================================================
 		function tab:CreateLabel(text)
 			local holder, strk = makeHolder(34)
 			local lbl = Instance.new("TextLabel")
@@ -1557,6 +1761,9 @@ function Library:CreateWindow(cfg)
 			return obj
 		end
 
+		-- ========================================================
+		-- CreateParagraph
+		-- ========================================================
 		function tab:CreateParagraph(pcfg)
 			pcfg = pcfg or {}
 			local holder = Instance.new("Frame")
@@ -1609,7 +1816,7 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateButton({ Name, Callback })
+		-- CreateButton
 		-- ========================================================
 		function tab:CreateButton(bcfg)
 			bcfg = bcfg or {}
@@ -1680,7 +1887,7 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateToggle({ Name, CurrentValue, Flag, Callback })
+		-- CreateToggle
 		-- ========================================================
 		function tab:CreateToggle(tcfg)
 			tcfg = tcfg or {}
@@ -1689,8 +1896,9 @@ function Library:CreateWindow(cfg)
 			local state = tcfg.CurrentValue == true
 
 			local holder, hStroke = makeHolder(42)
-			-- [FIX] If toggle starts ON, outline the holder immediately
+			-- If toggle starts ON, outline the holder immediately
 			if state then hStroke.Color = C.accentDim end
+
 			local lbl = Instance.new("TextLabel")
 			lbl.Size = UDim2.new(1, -68, 1, 0)
 			lbl.Position = UDim2.new(0, 14, 0, 0)
@@ -1718,9 +1926,8 @@ function Library:CreateWindow(cfg)
 			knob.Parent = sw
 			corner(knob, UDim.new(1, 0))
 
-			-- [FIX] Transparent overlay button — captures ALL taps on the holder
-			-- (including over sw/knob which have visible backgrounds and would
-			-- otherwise steal the input on mobile touch).
+			-- Transparent overlay button — captures ALL taps on the holder
+			-- (including over sw/knob which would otherwise steal input)
 			local hit = Instance.new("TextButton")
 			hit.Size = UDim2.new(1, 0, 1, 0)
 			hit.BackgroundTransparency = 1
@@ -1759,8 +1966,7 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateSlider({ Name, Range = {min,max}, Increment, Suffix,
-		--                CurrentValue, Flag, Callback })
+		-- CreateSlider
 		-- ========================================================
 		function tab:CreateSlider(scfg)
 			scfg = scfg or {}
@@ -1827,13 +2033,13 @@ function Library:CreateWindow(cfg)
 			local function snap(v)
 				v = math.clamp(v, minVal, maxVal)
 				v = minVal + math.floor((v - minVal) / increment + 0.5) * increment
-				-- kill float noise on fractional increments
 				local mult = 1 / increment
 				if mult == math.floor(mult) then
 					v = math.floor(v * mult + 0.5) / mult
 				end
 				return math.clamp(v, minVal, maxVal)
 			end
+
 			local function update(animated)
 				local pct = math.clamp((value - minVal) / (maxVal - minVal), 0, 1)
 				if animated then
@@ -1856,41 +2062,42 @@ function Library:CreateWindow(cfg)
 			end
 			function obj:Get() return value end
 
-				local function setFromX(x)
-					local pct = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-					local v = snap(minVal + pct * (maxVal - minVal))
-					if v ~= value then
-						value = v
-						obj.CurrentValue = v
-						update(false)
-					end
+			local function setFromX(x)
+				local pct = math.clamp((x - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+				local v = snap(minVal + pct * (maxVal - minVal))
+				if v ~= value then
+					value = v
+					obj.CurrentValue = v
+					update(false)
 				end
-				local function fireCallback()
-					if callback then pcall(callback, value) end
-				end
-				-- [FIX] Transparent overlay covering the whole holder. Tapping the
-				-- fill or knob (children of track with visible backgrounds) would
-				-- otherwise steal input and track.InputBegan would never fire.
-				local hit = Instance.new("TextButton")
-				hit.Size = UDim2.new(1, 0, 1, 0)
-				hit.BackgroundTransparency = 1
-				hit.Text = ""
-				hit.AutoButtonColor = false
-				hit.BorderSizePixel = 0
-				hit.ZIndex = 10
-				hit.Parent = holder
-				hit.InputBegan:Connect(function(inp)
-					if inp.UserInputType == Enum.UserInputType.MouseButton1
-						or inp.UserInputType == Enum.UserInputType.Touch then
-						Tween(knob, T10, { Size = UDim2.new(0, 20, 0, 20) })
-						setFromX(inp.Position.X)
+			end
+
+			local function fireCallback()
+				if callback then pcall(callback, value) end
+			end
+
+			-- Transparent overlay covering the whole holder
+			local hit = Instance.new("TextButton")
+			hit.Size = UDim2.new(1, 0, 1, 0)
+			hit.BackgroundTransparency = 1
+			hit.Text = ""
+			hit.AutoButtonColor = false
+			hit.BorderSizePixel = 0
+			hit.ZIndex = 10
+			hit.Parent = holder
+			hit.InputBegan:Connect(function(inp)
+				if inp.UserInputType == Enum.UserInputType.MouseButton1
+					or inp.UserInputType == Enum.UserInputType.Touch then
+					Tween(knob, T10, { Size = UDim2.new(0, 20, 0, 20) })
+					setFromX(inp.Position.X)
+					fireCallback()
+					registerDrag(hit, function(pos) setFromX(pos.X) end, function()
+						Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
 						fireCallback()
-						registerDrag(hit, function(pos) setFromX(pos.X) end, function()
-							Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
-							fireCallback()
-						end)
-					end
-				end)
+					end)
+				end
+			end)
+
 			onTheme(function()
 				Tween(holder, T20, { BackgroundColor3 = C.panel })
 				Tween(hStroke, T20, { Color = C.border })
@@ -1908,8 +2115,7 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateInput({ Name, PlaceholderText, CurrentValue,
-		--               RemoveTextAfterFocusLost, Flag, Callback })
+		-- CreateInput
 		-- ========================================================
 		function tab:CreateInput(icfg)
 			icfg = icfg or {}
@@ -1973,10 +2179,13 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateDropdown({ Name, Options, CurrentOption,
-		--                  MultipleOptions, Flag, Callback })
-		-- Multi-select: CurrentOption is a table; list stays open
-		-- while toggling; checkmarks flip in place.
+		-- CreateDropdown
+		--
+		-- [BUGFIX] Popup goes through openPopup/closeCurrentPopup.
+		-- [BUGFIX] Position does NOT divide by UIScale (Position
+		--   offset is in screen pixels, UIScale doesn't affect it).
+		--   Only SIZE is divided by scale to compensate for the
+		--   popup being inside the scaled screenGui.
 		-- ========================================================
 		function tab:CreateDropdown(dcfg)
 			dcfg = dcfg or {}
@@ -1985,7 +2194,7 @@ function Library:CreateWindow(cfg)
 			local multi    = dcfg.MultipleOptions == true
 			local callback = dcfg.Callback
 
-			local selected = {} -- set: option -> true
+			local selected = {}
 			do
 				local cur = dcfg.CurrentOption
 				if type(cur) == "table" then
@@ -2049,123 +2258,134 @@ function Library:CreateWindow(cfg)
 			end
 			obj.CurrentOption = multi and selectionList() or selectionList()[1]
 
-				local function openList()
-					closeCurrentPopup()
-					arrow.Text = "▴"
+			local function openList()
+				arrow.Text = "▴"
 
-					local catcher = Instance.new("TextButton")
-					catcher.Size = UDim2.new(1, 0, 1, 0)
-					catcher.BackgroundTransparency = 1
-					catcher.Text = ""
-					catcher.AutoButtonColor = false
-					catcher.Active = true
-					catcher.ZIndex = 8
-					catcher.Parent = screenGui
+				local catcher = Instance.new("TextButton")
+				catcher.Size = UDim2.new(1, 0, 1, 0)
+				catcher.BackgroundTransparency = 1
+				catcher.Text = ""
+				catcher.AutoButtonColor = false
+				catcher.Active = true
+				catcher.ZIndex = 8
+				catcher.Parent = screenGui
 
-					local hPos, hSize = holder.AbsolutePosition, holder.AbsoluteSize
-					-- [FIX] Account for UIScale — AbsolutePosition is already scaled,
-					-- but popup is in screenGui which scales AGAIN. Divide by scale.
-					local _uiScale = screenGui:FindFirstChild("UIScale")
-					local _s = _uiScale and _uiScale.Scale or 1
-					if _s > 0 then hPos = Vector2.new(hPos.X / _s, hPos.Y / _s) hSize = Vector2.new(hSize.X / _s, hSize.Y / _s) end
-					local ITEM_H = 30
-					local LIST_H = math.min(#options, 7) * (ITEM_H + 2) + 10
-					local cam = workspace.CurrentCamera
-					local vpH = cam and cam.ViewportSize.Y or 800
-					local dropDown = (hPos.Y + hSize.Y + LIST_H + 6 <= vpH)
-					local listY = dropDown and (hPos.Y + hSize.Y + 4) or (hPos.Y - LIST_H - 4)
+				-- Get holder position/size in screen pixels
+				local hPos  = holder.AbsolutePosition
+				local hSize = holder.AbsoluteSize
 
-					local list = Instance.new("ScrollingFrame")
-					list.Size = UDim2.new(0, hSize.X, 0, 0)
-					list.Position = UDim2.new(0, hPos.X, 0, dropDown and (hPos.Y + hSize.Y + 4) or hPos.Y)
-					list.BackgroundColor3 = C.panel
-					list.BackgroundTransparency = 0.15
-					list.BorderSizePixel = 0
-					list.ClipsDescendants = true
-					list.ScrollBarThickness = 3
-					list.ScrollBarImageColor3 = C.accent
-					list.CanvasSize = UDim2.new(0, 0, 0, #options * (ITEM_H + 2) + 10)
-					list.ZIndex = 9
-					list.Parent = screenGui
-					corner(list, R.panel)
-					stroke(list, C.accent, 1)
+				-- Compensate for UIScale: divide SIZE by scale so the
+				-- popup's visual width matches the holder's visual width.
+				-- Position is NOT divided — Position offset is in screen
+				-- pixels and UIScale doesn't affect it.
+				local s = uiScale.Scale
+				if s <= 0 then s = 1 end
 
-					Tween(list, T15, {
-						Size = UDim2.new(0, hSize.X, 0, LIST_H),
-						Position = UDim2.new(0, hPos.X, 0, listY),
-						BackgroundTransparency = 0,
-					})
+				local ITEM_H = 30
+				local LIST_H = math.min(#options, 7) * (ITEM_H + 2) + 10
+				local cam = workspace.CurrentCamera
+				local vpH = cam and cam.ViewportSize.Y or 800
+				local dropDown = (hPos.Y + hSize.Y + LIST_H + 6 <= vpH)
+				local listY = dropDown and (hPos.Y + hSize.Y + 4) or (hPos.Y - LIST_H - 4)
 
-					local lL = Instance.new("UIListLayout")
-					lL.Padding = UDim.new(0, 2)
-					lL.Parent = list
-					pad(list, 4, 4, 4, 4)
+				local list = Instance.new("ScrollingFrame")
+				list.Size = UDim2.new(0, hSize.X / s, 0, 0)
+				list.Position = UDim2.new(0, hPos.X, 0, dropDown and (hPos.Y + hSize.Y + 4) or hPos.Y)
+				list.BackgroundColor3 = C.panel
+				list.BackgroundTransparency = 0.15
+				list.BorderSizePixel = 0
+				list.ClipsDescendants = true
+				list.ScrollBarThickness = 3
+				list.ScrollBarImageColor3 = C.accent
+				list.CanvasSize = UDim2.new(0, 0, 0, #options * (ITEM_H + 2) + 10)
+				list.ZIndex = 9
+				list.Parent = screenGui
+				corner(list, R.panel)
+				stroke(list, C.accent, 1)
 
-					local function closePopup()
-						pcall(function() catcher:Destroy() end)
-						pcall(function() list:Destroy() end)
-						arrow.Text = "▾"
-					end
+				Tween(list, T15, {
+					Size = UDim2.new(0, hSize.X / s, 0, LIST_H),
+					Position = UDim2.new(0, hPos.X, 0, listY),
+					BackgroundTransparency = 0,
+				})
 
-					for _, opt in ipairs(options) do
-						local item = Instance.new("TextButton")
-						item.Size = UDim2.new(1, -4, 0, ITEM_H)
-						item.BackgroundColor3 = C.panelAlt
-						item.Text = ""
-						item.AutoButtonColor = false
-						item.ZIndex = 10
-						item.Parent = list
-						corner(item, R.small)
+				local lL = Instance.new("UIListLayout")
+				lL.Padding = UDim.new(0, 2)
+				lL.Parent = list
+				pad(list, 4, 4, 4, 4)
 
-						local iLbl = Instance.new("TextLabel")
-						iLbl.Size = UDim2.new(1, -30, 1, 0)
-						iLbl.Position = UDim2.new(0, 10, 0, 0)
-						iLbl.BackgroundTransparency = 1
-						iLbl.Font = Enum.Font.Gotham
-						iLbl.TextSize = 13
-						iLbl.TextColor3 = selected[opt] and C.accent or C.text
-						iLbl.TextXAlignment = Enum.TextXAlignment.Left
-						iLbl.Text = opt
-						iLbl.ZIndex = 10
-						iLbl.Parent = item
-
-						local check = Instance.new("TextLabel")
-						check.Size = UDim2.new(0, 18, 1, 0)
-						check.Position = UDim2.new(1, -22, 0, 0)
-						check.BackgroundTransparency = 1
-						check.Font = Enum.Font.GothamBold
-						check.TextSize = 13
-						check.TextColor3 = C.accent
-						check.Text = selected[opt] and "✓" or ""
-						check.ZIndex = 10
-						check.Parent = item
-
-						item.MouseEnter:Connect(function()
-							Tween(item, T10, { BackgroundColor3 = C.panelHov })
-						end)
-						item.MouseLeave:Connect(function()
-							Tween(item, T10, { BackgroundColor3 = C.panelAlt })
-						end)
-						item.MouseButton1Click:Connect(function()
-							if multi then
-								selected[opt] = not selected[opt] or nil
-								check.Text = selected[opt] and "✓" or ""
-								iLbl.TextColor3 = selected[opt] and C.accent or C.text
-								refreshLabel()
-								fire()
-							else
-								table.clear(selected)
-								selected[opt] = true
-								refreshLabel()
-								closePopup()
-								fire()
-							end
-						end)
-					end
-
-					catcher.MouseButton1Click:Connect(closePopup)
-					currentPopupJanitor = nil  -- no Janitor, direct cleanup
+				local function closePopup()
+					pcall(function() catcher:Destroy() end)
+					pcall(function() list:Destroy() end)
+					arrow.Text = "▾"
 				end
+
+				-- Register with popup manager so opening another popup
+				-- (or minimizing, or hiding) closes this one
+				openPopup(closePopup)
+
+				for _, opt in ipairs(options) do
+					local item = Instance.new("TextButton")
+					item.Size = UDim2.new(1, -4, 0, ITEM_H)
+					item.BackgroundColor3 = C.panelAlt
+					item.Text = ""
+					item.AutoButtonColor = false
+					item.ZIndex = 10
+					item.Parent = list
+					corner(item, R.small)
+
+					local iLbl = Instance.new("TextLabel")
+					iLbl.Size = UDim2.new(1, -30, 1, 0)
+					iLbl.Position = UDim2.new(0, 10, 0, 0)
+					iLbl.BackgroundTransparency = 1
+					iLbl.Font = Enum.Font.Gotham
+					iLbl.TextSize = 13
+					iLbl.TextColor3 = selected[opt] and C.accent or C.text
+					iLbl.TextXAlignment = Enum.TextXAlignment.Left
+					iLbl.Text = opt
+					iLbl.ZIndex = 10
+					iLbl.Parent = item
+
+					local check = Instance.new("TextLabel")
+					check.Size = UDim2.new(0, 18, 1, 0)
+					check.Position = UDim2.new(1, -22, 0, 0)
+					check.BackgroundTransparency = 1
+					check.Font = Enum.Font.GothamBold
+					check.TextSize = 13
+					check.TextColor3 = C.accent
+					check.Text = selected[opt] and "✓" or ""
+					check.ZIndex = 10
+					check.Parent = item
+
+					item.MouseEnter:Connect(function()
+						Tween(item, T10, { BackgroundColor3 = C.panelHov })
+					end)
+					item.MouseLeave:Connect(function()
+						Tween(item, T10, { BackgroundColor3 = C.panelAlt })
+					end)
+					item.MouseButton1Click:Connect(function()
+						if multi then
+							selected[opt] = not selected[opt] or nil
+							check.Text = selected[opt] and "✓" or ""
+							iLbl.TextColor3 = selected[opt] and C.accent or C.text
+							refreshLabel()
+							fire()
+						else
+							table.clear(selected)
+							selected[opt] = true
+							refreshLabel()
+							closePopup()
+							currentPopupCleanup = nil
+							fire()
+						end
+					end)
+				end
+
+				catcher.MouseButton1Click:Connect(function()
+					closePopup()
+					currentPopupCleanup = nil
+				end)
+			end
 
 			holder.InputBegan:Connect(function(inp)
 				if inp.UserInputType == Enum.UserInputType.MouseButton1
@@ -2214,25 +2434,23 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateKeybind({ Name, CurrentKeybind, HoldToInteract,
-		--                 Flag, Callback })
-		-- Functional: click the pill to rebind (next key pressed
-		-- becomes the bind, Escape cancels). Global listener fires
-		-- Callback when the bound key is pressed anywhere (skipped
-		-- while a TextBox is focused). HoldToInteract fires
-		-- Callback(true) on press / Callback(false) on release.
+		-- CreateKeybind
+		--
+		-- [BUGFIX] Uses the global Keybinds dispatcher instead
+		-- of adding its own InputBegan connection.
+		-- [BUGFIX] Rebind catcher goes through openPopup so it's
+		-- cleaned up properly.
 		-- ========================================================
 		function tab:CreateKeybind(kcfg)
 			kcfg = kcfg or {}
 			local nameText = kcfg.Name or "Keybind"
 			local callback = kcfg.Callback
 			local hold     = kcfg.HoldToInteract == true
-			local bound    = kcfg.CurrentKeybind -- Enum.KeyCode or string
+			local bound    = kcfg.CurrentKeybind
 			if type(bound) == "string" then
 				local ok, kc = pcall(function() return Enum.KeyCode[bound] end)
 				bound = ok and kc or nil
 			end
-			local listening = false
 
 			local holder, hStroke = makeHolder(38)
 			local lbl = Instance.new("TextLabel")
@@ -2267,42 +2485,50 @@ function Library:CreateWindow(cfg)
 			keyLbl.Parent = pill
 
 			local obj = { CurrentKeybind = bound }
+			local kb = {
+				bound = bound,
+				hold = hold,
+				callback = callback,
+				listening = false,
+				pill = pill,
+				pillStroke = pillStroke,
+			}
 
-				local rebindCatcher = nil  -- set when rebind mode starts
-
-				local function stopListening(newKey)
-					listening = false
-					if rebindCatcher then rebindCatcher:Destroy() rebindCatcher = nil end
+			local function stopListening(newKey)
+				kb.listening = false
 				if newKey ~= nil then
 					bound = newKey
 					obj.CurrentKeybind = bound
+					kb.bound = bound
 				end
 				keyLbl.Text = keyName(bound)
 				Tween(pill, T15, { BackgroundColor3 = C.accentDark })
 				Tween(pillStroke, T15, { Color = C.accentDim, Thickness = 1 })
 			end
+			kb.stopListening = stopListening
 
 			pill.MouseEnter:Connect(function()
-				if not listening then
+				if not kb.listening then
 					Tween(pill, T10, { BackgroundColor3 = C.accentDim })
 				end
 			end)
 			pill.MouseLeave:Connect(function()
-				if not listening then
+				if not kb.listening then
 					Tween(pill, T10, { BackgroundColor3 = C.accentDark })
 				end
 			end)
 			pill.MouseButton1Click:Connect(function()
-				if listening then
+				if kb.listening then
 					stopListening(nil)
 					return
 				end
-				listening = true
+				kb.listening = true
 				keyLbl.Text = "..."
 				Tween(pill, T15, { BackgroundColor3 = C.panelHov })
 				Tween(pillStroke, T15, { Color = C.accent, Thickness = 1.5 })
-				-- Catcher: clicking outside the pill cancels rebind
-				rebindCatcher = Instance.new("TextButton")
+
+				-- Rebind catcher — goes through popup manager
+				local rebindCatcher = Instance.new("TextButton")
 				rebindCatcher.Size = UDim2.new(1, 0, 1, 0)
 				rebindCatcher.BackgroundTransparency = 1
 				rebindCatcher.Text = ""
@@ -2313,43 +2539,16 @@ function Library:CreateWindow(cfg)
 				rebindCatcher.MouseButton1Click:Connect(function()
 					stopListening(nil)
 				end)
+				openPopup(function()
+					pcall(function() rebindCatcher:Destroy() end)
+					if kb.listening then
+						stopListening(nil)
+					end
+				end)
 			end)
 
-			WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
-				if listening then
-					if inp.UserInputType == Enum.UserInputType.Keyboard then
-						if inp.KeyCode == Enum.KeyCode.Escape then
-							stopListening(nil)
-						else
-							stopListening(inp.KeyCode)
-						end
-					end
-					return
-				end
-				if gp then return end
-				if bound and inp.KeyCode == bound and not UserInputService:GetFocusedTextBox() then
-					Tween(pill, TPRESS, { BackgroundColor3 = C.accentDim })
-					task.delay(0.12, function()
-						if not listening then
-							Tween(pill, T15, { BackgroundColor3 = C.accentDark })
-						end
-					end)
-					if callback then
-						if hold then
-							pcall(callback, true)
-						else
-							pcall(callback)
-						end
-					end
-				end
-			end))
-			if hold then
-				WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
-					if bound and inp.KeyCode == bound and not listening then
-						if callback then pcall(callback, false) end
-					end
-				end))
-			end
+			-- Register with global dispatcher
+			table.insert(Keybinds, kb)
 
 			function obj:Set(newKey)
 				if type(newKey) == "string" then
@@ -2358,6 +2557,7 @@ function Library:CreateWindow(cfg)
 				end
 				bound = newKey
 				obj.CurrentKeybind = bound
+				kb.bound = bound
 				keyLbl.Text = keyName(bound)
 			end
 			function obj:Get() return bound end
@@ -2375,7 +2575,10 @@ function Library:CreateWindow(cfg)
 		end
 
 		-- ========================================================
-		-- CreateColorPicker({ Name, Color, Flag, Callback })
+		-- CreateColorPicker (HSV pad + hue slider)
+		--
+		-- [BUGFIX] Popup goes through openPopup/closeCurrentPopup.
+		-- [BUGFIX] No `pad` variable shadowing (renamed to hsvPad).
 		-- ========================================================
 		function tab:CreateColorPicker(ccfg)
 			ccfg = ccfg or {}
@@ -2408,7 +2611,6 @@ function Library:CreateWindow(cfg)
 			local obj = { Color = ccfg.Color or C.white }
 
 			local function openPicker()
-				closeCurrentPopup()
 				local h, s, v = obj.Color:ToHSV()
 
 				local catcher = Instance.new("TextButton")
@@ -2422,14 +2624,18 @@ function Library:CreateWindow(cfg)
 				catcher.Parent = screenGui
 				Tween(catcher, T15, { BackgroundTransparency = 0.5 })
 
+				-- Position popup near the swatch — account for UIScale on SIZE only
 				local sp = swatch.AbsolutePosition
+				local scale = uiScale.Scale
+				if scale <= 0 then scale = 1 end
 				local cam = workspace.CurrentCamera
 				local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-				local px = math.clamp(sp.X - 160, 10, vp.X - 280)
-				local py = math.clamp(sp.Y - 270, 10, vp.Y - 290)
+				local panelW, panelH = 270, 280
+				local px = math.clamp(sp.X - 160, 10, vp.X - panelW - 10)
+				local py = math.clamp(sp.Y - 270, 10, vp.Y - panelH - 10)
 
 				local panel = Instance.new("Frame")
-				panel.Size = UDim2.new(0, 270, 0, 280)
+				panel.Size = UDim2.new(0, panelW, 0, panelH)
 				panel.Position = UDim2.new(0, px, 0, py)
 				panel.BackgroundColor3 = C.panel
 				panel.BorderSizePixel = 0
@@ -2462,16 +2668,17 @@ function Library:CreateWindow(cfg)
 				stroke(preview, C.border, 1.5)
 
 				-- HSV color pad (saturation x value)
-				local pad = Instance.new("TextButton")
-				pad.Size = UDim2.new(0, 200, 0, 150)
-				pad.Position = UDim2.new(0, 14, 0, 40)
-				pad.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
-				pad.AutoButtonColor = false
-				pad.BorderSizePixel = 0
-				pad.Text = ""
-				pad.ZIndex = 9
-				pad.Parent = panel
-				corner(pad, R.small)
+				local hsvPad = Instance.new("TextButton")
+				hsvPad.Size = UDim2.new(0, 200, 0, 150)
+				hsvPad.Position = UDim2.new(0, 14, 0, 40)
+				hsvPad.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+				hsvPad.AutoButtonColor = false
+				hsvPad.BorderSizePixel = 0
+				hsvPad.Text = ""
+				hsvPad.ZIndex = 9
+				hsvPad.Parent = panel
+				corner(hsvPad, R.small)
+
 				-- White gradient (left to right = saturation)
 				local padWhite = Instance.new("Frame")
 				padWhite.Size = UDim2.new(1, 0, 1, 0)
@@ -2479,18 +2686,19 @@ function Library:CreateWindow(cfg)
 				padWhite.BackgroundTransparency = 0
 				padWhite.BorderSizePixel = 0
 				padWhite.ZIndex = 9
-				padWhite.Parent = pad
+				padWhite.Parent = hsvPad
 				local padWhiteGrad = Instance.new("UIGradient")
 				padWhiteGrad.Color = ColorSequence.new(C.white, Color3.new(0,0,0))
 				padWhiteGrad.Transparency = NumberSequence.new(0, 1)
 				padWhiteGrad.Parent = padWhite
+
 				-- Black gradient (top to bottom = value)
 				local padBlack = Instance.new("Frame")
 				padBlack.Size = UDim2.new(1, 0, 1, 0)
 				padBlack.BackgroundColor3 = C.black
 				padBlack.BorderSizePixel = 0
 				padBlack.ZIndex = 10
-				padBlack.Parent = pad
+				padBlack.Parent = hsvPad
 				local padBlackGrad = Instance.new("UIGradient")
 				padBlackGrad.Color = ColorSequence.new(C.black, Color3.new(0,0,0))
 				padBlackGrad.Transparency = NumberSequence.new(1, 0)
@@ -2505,7 +2713,7 @@ function Library:CreateWindow(cfg)
 				pointer.BackgroundColor3 = C.white
 				pointer.BorderSizePixel = 0
 				pointer.ZIndex = 12
-				pointer.Parent = pad
+				pointer.Parent = hsvPad
 				corner(pointer, UDim.new(1, 0))
 				stroke(pointer, C.black, 1.5)
 
@@ -2522,13 +2730,13 @@ function Library:CreateWindow(cfg)
 				corner(hueSlider, UDim.new(1, 0))
 				local hueGrad = Instance.new("UIGradient")
 				hueGrad.Color = ColorSequence.new({
-					ColorSequenceKeypoint.new(0, Color3.fromHSV(0, 1, 1)),
+					ColorSequenceKeypoint.new(0,    Color3.fromHSV(0, 1, 1)),
 					ColorSequenceKeypoint.new(0.17, Color3.fromHSV(0.17, 1, 1)),
 					ColorSequenceKeypoint.new(0.33, Color3.fromHSV(0.33, 1, 1)),
-					ColorSequenceKeypoint.new(0.5, Color3.fromHSV(0.5, 1, 1)),
+					ColorSequenceKeypoint.new(0.5,  Color3.fromHSV(0.5, 1, 1)),
 					ColorSequenceKeypoint.new(0.67, Color3.fromHSV(0.67, 1, 1)),
 					ColorSequenceKeypoint.new(0.83, Color3.fromHSV(0.83, 1, 1)),
-					ColorSequenceKeypoint.new(1, Color3.fromHSV(1, 1, 1)),
+					ColorSequenceKeypoint.new(1,    Color3.fromHSV(1, 1, 1)),
 				})
 				hueGrad.Parent = hueSlider
 
@@ -2575,35 +2783,38 @@ function Library:CreateWindow(cfg)
 					obj.Color = Color3.fromHSV(h, s, v)
 					swatch.BackgroundColor3 = obj.Color
 					preview.BackgroundColor3 = obj.Color
-					pad.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
+					hsvPad.BackgroundColor3 = Color3.fromHSV(h, 1, 1)
 					pointer.Position = UDim2.new(s, 0, 1 - v, 0)
 					hueKnob.Position = UDim2.new(h, 0, 0.5, 0)
-					local r2, g2, b2 = math.floor(obj.Color.R * 255 + 0.5), math.floor(obj.Color.G * 255 + 0.5), math.floor(obj.Color.B * 255 + 0.5)
+					local r2 = math.floor(obj.Color.R * 255 + 0.5)
+					local g2 = math.floor(obj.Color.G * 255 + 0.5)
+					local b2 = math.floor(obj.Color.B * 255 + 0.5)
 					hexLbl.Text = string.format("#%02X%02X%02X", r2, g2, b2)
 					if callback then pcall(callback, obj.Color) end
-					end
+				end
 				update()
 
-				-- Pad drag — uses InputBegan for mouse+touch support
-				pad.InputBegan:Connect(function(inp)
-					if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-						registerDrag(pad, function(pos)
-							local px2 = math.clamp((pos.X - pad.AbsolutePosition.X) / pad.AbsoluteSize.X, 0, 1)
-							local py2 = math.clamp((pos.Y - pad.AbsolutePosition.Y) / pad.AbsoluteSize.Y, 0, 1)
+				-- Pad drag
+				hsvPad.InputBegan:Connect(function(inp)
+					if inp.UserInputType == Enum.UserInputType.MouseButton1
+						or inp.UserInputType == Enum.UserInputType.Touch then
+						registerDrag(hsvPad, function(pos)
+							local px2 = math.clamp((pos.X - hsvPad.AbsolutePosition.X) / hsvPad.AbsoluteSize.X, 0, 1)
+							local py2 = math.clamp((pos.Y - hsvPad.AbsolutePosition.Y) / hsvPad.AbsoluteSize.Y, 0, 1)
 							s = px2
 							v = 1 - py2
 							update()
 						end)
-						-- Set initial position
-						s = math.clamp((inp.Position.X - pad.AbsolutePosition.X) / pad.AbsoluteSize.X, 0, 1)
-						v = 1 - math.clamp((inp.Position.Y - pad.AbsolutePosition.Y) / pad.AbsoluteSize.Y, 0, 1)
+						s = math.clamp((inp.Position.X - hsvPad.AbsolutePosition.X) / hsvPad.AbsoluteSize.X, 0, 1)
+						v = 1 - math.clamp((inp.Position.Y - hsvPad.AbsolutePosition.Y) / hsvPad.AbsoluteSize.Y, 0, 1)
 						update()
 					end
 				end)
 
-				-- Hue slider drag — uses InputBegan for mouse+touch
+				-- Hue slider drag
 				hueSlider.InputBegan:Connect(function(inp)
-					if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
+					if inp.UserInputType == Enum.UserInputType.MouseButton1
+						or inp.UserInputType == Enum.UserInputType.Touch then
 						registerDrag(hueSlider, function(pos)
 							h = math.clamp((pos.X - hueSlider.AbsolutePosition.X) / hueSlider.AbsoluteSize.X, 0, 1)
 							update()
@@ -2618,9 +2829,17 @@ function Library:CreateWindow(cfg)
 					pcall(function() catcher:Destroy() end)
 					pcall(function() panel:Destroy() end)
 				end
-				doneBtn.MouseButton1Click:Connect(closePopup)
-				catcher.MouseButton1Click:Connect(closePopup)
-				currentPopupJanitor = nil
+				doneBtn.MouseButton1Click:Connect(function()
+					closePopup()
+					currentPopupCleanup = nil
+				end)
+				catcher.MouseButton1Click:Connect(function()
+					closePopup()
+					currentPopupCleanup = nil
+				end)
+
+				-- Register with popup manager
+				openPopup(closePopup)
 			end
 
 			swatch.MouseButton1Click:Connect(openPicker)
@@ -2636,47 +2855,40 @@ function Library:CreateWindow(cfg)
 				Tween(holder, T20, { BackgroundColor3 = C.panel })
 				Tween(hStroke, T20, { Color = C.border })
 				Tween(lbl, T20, { TextColor3 = C.text })
-				Tween(swatch, T20, { })
 			end)
 			registerFlag(ccfg.Flag, obj)
 			return obj
 		end
 
-		-- Short-form aliases via metatable proxy — both tab:CreateButton(...)
-		-- and tab.Button(...) work without collision.
-		local aliases = {
-			Label = function(_, text) return tab:CreateSection(text) end,
-			Divider = function(_, text) return tab:CreateDivider(text) end,
-			Button = function(_, n, cb) return tab:CreateButton({ Name = n, Callback = cb }) end,
-			Toggle = function(_, n, d, cb) return tab:CreateToggle({ Name = n, CurrentValue = d, Callback = cb }) end,
-			Slider = function(_, n, mn, mx, d, sfx, cb)
-				return tab:CreateSlider({ Name = n, Range = { mn, mx }, CurrentValue = d, Suffix = sfx, Callback = cb })
-			end,
-			Input = function(_, n, ph, cb) return tab:CreateInput({ Name = n, PlaceholderText = ph, Callback = cb }) end,
-			Dropdown = function(_, n, opts, d, cb)
-				return tab:CreateDropdown({ Name = n, Options = opts, CurrentOption = d, Callback = cb })
-			end,
-			ColorPicker = function(_, n, d, cb) return tab:CreateColorPicker({ Name = n, Color = d, Callback = cb }) end,
-			Paragraph = function(_, t, c) return tab:CreateParagraph({ Title = t, Content = c }) end,
-			Keybind = function(_, n, k, cb) return tab:CreateKeybind({ Name = n, CurrentKeybind = k, Callback = cb }) end,
-		}
-		local wrapper = setmetatable({}, {
-			__index = function(_, k)
-				return aliases[k] or tab[k]
-			end,
-			__newindex = function(_, k, v)
-				tab[k] = v
-			end,
-		})
-		return wrapper
+		-- ========================================================
+		-- Short-form aliases — set directly on tab (no metatable proxy)
+		-- ========================================================
+		function tab:Label(text)          return tab:CreateSection(text) end
+		function tab:Divider(text)        return tab:CreateDivider(text) end
+		function tab:Button(n, cb)        return tab:CreateButton({ Name = n, Callback = cb }) end
+		function tab:Toggle(n, d, cb)     return tab:CreateToggle({ Name = n, CurrentValue = d, Callback = cb }) end
+		function tab:Slider(n, mn, mx, d, sfx, cb)
+			return tab:CreateSlider({ Name = n, Range = { mn, mx }, CurrentValue = d, Suffix = sfx, Callback = cb })
+		end
+		function tab:Input(n, ph, cb)     return tab:CreateInput({ Name = n, PlaceholderText = ph, Callback = cb }) end
+		function tab:Dropdown(n, opts, d, cb)
+			return tab:CreateDropdown({ Name = n, Options = opts, CurrentOption = d, Callback = cb })
+		end
+		function tab:ColorPicker(n, d, cb) return tab:CreateColorPicker({ Name = n, Color = d, Callback = cb }) end
+		function tab:Paragraph(t, c)      return tab:CreateParagraph({ Title = t, Content = c }) end
+		function tab:Keybind(n, k, cb)    return tab:CreateKeybind({ Name = n, CurrentKeybind = k, Callback = cb }) end
+
+		return tab
 	end
 
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 	-- Destroy
-	-- ------------------------------------------------------------
+	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
+
 	function Window:Destroy()
 		closeCurrentPopup()
-		table.clear(DragHandlers)  -- clear stale drag handlers
+		table.clear(DragHandlers)
+		table.clear(Keybinds)
 		WindowJanitor:Cleanup()
 	end
 
@@ -2688,6 +2900,7 @@ end
 -- ============================================================
 -- LIBRARY-LEVEL API (Rayfield-style)
 -- ============================================================
+
 function Library:Notify(cfg)
 	if Library._lastWindow then
 		return Library._lastWindow:Notify(cfg)

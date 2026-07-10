@@ -463,12 +463,13 @@ function Library:CreateWindow(cfg)
 	if not screenGui.Parent then screenGui.Parent = playerGui end
 	WindowJanitor:Add(screenGui)
 
-	local uiScale = Instance.new("UIScale")
-	uiScale.Scale = 1
-	uiScale.Parent = screenGui
-
 	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
-	-- AUTO SCALE (mobile friendly)
+	-- AUTO FIT (mobile friendly) — no UIScale, direct sizing
+	--
+	-- [FIX] Removed UIScale entirely. UIScale caused drag flinging because
+	-- AbsolutePosition returns screen pixels (post-scale) but Position
+	-- offset is in unscaled pixels — reading one and writing the other
+	-- made the window jump. Rayfield sizes the window directly; we do too.
 	-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --
 
 	local function getViewport()
@@ -476,19 +477,43 @@ function Library:CreateWindow(cfg)
 		return cam and cam.ViewportSize or Vector2.new(1920, 1080)
 	end
 
-	local function updateScale()
+	local DEFAULT_W, DEFAULT_H = WIN_W, WIN_H
+
+	local function updateFit()
 		local vp = getViewport()
-		local scaleX = (vp.X - 16) / WIN_W
-		local scaleY = (vp.Y - 120) / WIN_H
-		local scale = math.clamp(math.min(scaleX, scaleY), 0.5, 1.0)
-		uiScale.Scale = scale
+		local maxW = vp.X - 16
+		local maxH = vp.Y - 120
+		local newW = math.clamp(DEFAULT_W, MIN_W, math.min(DEFAULT_W, maxW))
+		local newH = math.clamp(DEFAULT_H, MIN_H, math.min(DEFAULT_H, maxH))
+		if newW ~= WIN_W or newH ~= WIN_H then
+			WIN_W = newW
+			WIN_H = newH
+			frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
+			shadow.Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36)
+			if not Window._minimized then
+				body.Size = UDim2.new(1, 0, 0, WIN_H - HEADER_H)
+			end
+		end
 	end
 
-	updateScale()
-	WindowJanitor:Add(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale))
-	-- Re-apply after delays — camera viewport may not be ready at script start
-	task.delay(0.3, updateScale)
-	task.delay(1.0, updateScale)
+	local function updateScale() updateFit() end
+
+	local function centerWindow()
+		local vp = getViewport()
+		local nx = math.floor((vp.X - WIN_W) / 2)
+		local ny = math.floor((vp.Y - WIN_H) / 2 - 20)
+		frame.Position = UDim2.new(0, nx, 0, ny)
+		shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
+	end
+
+	updateFit()
+	centerWindow()
+	WindowJanitor:Add(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+		updateFit()
+		centerWindow()
+	end))
+	task.delay(0.3, function() updateFit() centerWindow() end)
+	task.delay(1.0, function() updateFit() centerWindow() end)
 
 	local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 24
 
@@ -499,7 +524,7 @@ function Library:CreateWindow(cfg)
 	local shadow = Instance.new("Frame")
 	shadow.Name = "Shadow"
 	shadow.Size = UDim2.new(0, WIN_W + 36, 0, WIN_H + 36)
-	shadow.Position = UDim2.new(0.5, -(WIN_W + 36) / 2, 0.55, -(WIN_H + 36) / 2)
+	shadow.Position = UDim2.new(0, 0, 0, 0)  -- centerWindow() sets this
 	shadow.BackgroundColor3 = Color3.new(0, 0, 0)
 	shadow.BackgroundTransparency = 0.52
 	shadow.BorderSizePixel = 0
@@ -510,7 +535,7 @@ function Library:CreateWindow(cfg)
 	local frame = Instance.new("Frame")
 	frame.Name = "Window"
 	frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
-	frame.Position = UDim2.new(0.5, -WIN_W / 2, 0.55, -WIN_H / 2)
+	frame.Position = UDim2.new(0, 0, 0, 0)  -- centerWindow() sets this
 	frame.BackgroundColor3 = C.bg
 	frame.BorderSizePixel = 0
 	frame.ClipsDescendants = true
@@ -849,8 +874,8 @@ function Library:CreateWindow(cfg)
 			registerDrag("floatIcon", function(pos)
 				local d = pos - startDrag
 				if d.Magnitude > 6 then floatDragMoved = true end
-				local nx = math.clamp(startAbs.X + d.X, 0, vp.X - 52)
-				local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 52)
+				local nx = math.clamp(startAbs.X + d.X, 0, math.max(0, vp.X - 60))
+				local ny = math.clamp(startAbs.Y + d.Y, 0, math.max(0, vp.Y - 60))
 				floatIcon.Position = UDim2.new(0, nx, 0, ny)
 			end)
 		end
@@ -888,13 +913,13 @@ function Library:CreateWindow(cfg)
 			-- Threshold of 3px prevents accidental drags on tap
 			registerDrag("window", function(pos)
 				local d = pos - dragStart
-				local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
-				local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 30)
+				local nx = math.clamp(startAbs.X + d.X, 0, math.max(0, vp.X - 80))
+				local ny = math.clamp(startAbs.Y + d.Y, 0, math.max(0, vp.Y - 40))
 				frame.Position = UDim2.new(0, nx, 0, ny)
 				shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
 			end, function()
 				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-			end, 3)
+			end)
 		end
 	end))
 
@@ -1083,13 +1108,13 @@ function Library:CreateWindow(cfg)
 			local vp = getViewport()
 			registerDrag("statusbar", function(pos)
 				local d = pos - dragStart
-				local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
-				local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 30)
+				local nx = math.clamp(startAbs.X + d.X, 0, math.max(0, vp.X - 80))
+				local ny = math.clamp(startAbs.Y + d.Y, 0, math.max(0, vp.Y - 40))
 				frame.Position = UDim2.new(0, nx, 0, ny)
 				shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
 			end, function()
 				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-			end, 3)
+			end)
 		end
 	end))
 
@@ -2277,13 +2302,6 @@ function Library:CreateWindow(cfg)
 				local hPos  = holder.AbsolutePosition
 				local hSize = holder.AbsoluteSize
 
-				-- Compensate for UIScale: divide SIZE by scale so the
-				-- popup's visual width matches the holder's visual width.
-				-- Position is NOT divided — Position offset is in screen
-				-- pixels and UIScale doesn't affect it.
-				local s = uiScale.Scale
-				if s <= 0 then s = 1 end
-
 				local ITEM_H = 30
 				local LIST_H = math.min(#options, 7) * (ITEM_H + 2) + 10
 				local cam = workspace.CurrentCamera
@@ -2291,8 +2309,9 @@ function Library:CreateWindow(cfg)
 				local dropDown = (hPos.Y + hSize.Y + LIST_H + 6 <= vpH)
 				local listY = dropDown and (hPos.Y + hSize.Y + 4) or (hPos.Y - LIST_H - 4)
 
+				-- [FIX] No UIScale division — UIScale was removed.
 				local list = Instance.new("ScrollingFrame")
-				list.Size = UDim2.new(0, hSize.X / s, 0, 0)
+				list.Size = UDim2.new(0, hSize.X, 0, 0)
 				list.Position = UDim2.new(0, hPos.X, 0, dropDown and (hPos.Y + hSize.Y + 4) or hPos.Y)
 				list.BackgroundColor3 = C.panel
 				list.BackgroundTransparency = 0.15
@@ -2307,7 +2326,7 @@ function Library:CreateWindow(cfg)
 				stroke(list, C.accent, 1)
 
 				Tween(list, T15, {
-					Size = UDim2.new(0, hSize.X / s, 0, LIST_H),
+					Size = UDim2.new(0, hSize.X, 0, LIST_H),
 					Position = UDim2.new(0, hPos.X, 0, listY),
 					BackgroundTransparency = 0,
 				})
@@ -2623,10 +2642,8 @@ function Library:CreateWindow(cfg)
 				catcher.Parent = screenGui
 				Tween(catcher, T15, { BackgroundTransparency = 0.5 })
 
-				-- Position popup near the swatch — account for UIScale on SIZE only
+				-- Position popup near the swatch
 				local sp = swatch.AbsolutePosition
-				local scale = uiScale.Scale
-				if scale <= 0 then scale = 1 end
 				local cam = workspace.CurrentCamera
 				local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
 				local panelW, panelH = 270, 280

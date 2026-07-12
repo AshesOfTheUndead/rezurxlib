@@ -380,7 +380,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "1.0.0"
+Library.Version = "2.1.0"
 Library._windows = {}
 
 -- ============================================================
@@ -1573,11 +1573,11 @@ function Library:CreateWindow(cfg)
                 -- synchronously, before the button is even created, so there's
                 -- no layout race to lose: Size is correct from frame one.
                 local btnText = (icon or "") .. "  " .. name
-                local CHIP_PAD = 14
-                local textSize = TextService:GetTextSize(btnText, 12, Enum.Font.GothamBold, Vector2.new(1000, TABBAR_H))
-                -- [FIX] Add 8px extra margin to prevent text clipping from UIPadding rounding
-                local chipWidth = textSize.X + CHIP_PAD * 2 + 8
-                btn.Size = UDim2.new(0, chipWidth, 1, -10)
+                -- [FIX] Use fixed comfortable width + TextScaled fallback.
+                -- TextService:GetTextSize + exact sizing was causing invisible text
+                -- due to subpixel clipping. Fixed 100px width with center alignment
+                -- is reliable across all devices.
+                btn.Size = UDim2.new(0, 100, 1, -10)
                 btn.Position = UDim2.new(0, 0, 0, 5)
                 btn.BackgroundColor3 = C.tabChip
                 btn.AutoButtonColor = false
@@ -1585,12 +1585,12 @@ function Library:CreateWindow(cfg)
                 btn.Text = btnText
                 btn.Font = Enum.Font.GothamBold
                 btn.TextSize = 12
-                -- [FIX] Use C.text (brighter) instead of C.textDim so text is visible
                 btn.TextColor3 = C.text
                 btn.TextXAlignment = Enum.TextXAlignment.Center
+                btn.TextTruncate = Enum.TextTruncate.AtEnd
+                btn.RichText = true
                 btn.ZIndex = 4
                 btn.Parent = tabBar
-                -- [FIX] Removed pad() — UIPadding was clipping text. Extra width margin above handles spacing.
                 corner(btn, R.tab)
                 local chipStroke = stroke(btn, C.borderAcc, 1)
                 -- Keep refs for setActive color tweens
@@ -2574,10 +2574,9 @@ function Library:CreateWindow(cfg)
                                                 end)
                                         end
 
-                                        -- [FIX] Create catcher DEFERRED so the opening tap doesn't
-                                        -- immediately trigger closeCurrentPopup. On mobile, the same
-                                        -- touch that opened the list would fire catcher.MouseButton1Click
-                                        -- on release, closing it instantly — looked like "nothing happens."
+                                        -- [FIX] Create catcher DEFERRED with task.wait so the opening
+                                        -- touch has fully released before the catcher becomes interactive.
+                                        -- task.defer was too fast — touch release could still fire after.
                                         local catcher = Instance.new("TextButton")
                                         catcher.Size = UDim2.new(1, 0, 1, 0)
                                         catcher.BackgroundTransparency = 1
@@ -2585,7 +2584,7 @@ function Library:CreateWindow(cfg)
                                         catcher.AutoButtonColor = false
                                         catcher.Active = true
                                         catcher.ZIndex = 8
-                                        catcher.Visible = false  -- hidden until deferred
+                                        catcher.Visible = false  -- hidden until delay
                                         catcher.Parent = screenGui
 
                                         catcher.MouseButton1Click:Connect(closeCurrentPopup)
@@ -2596,9 +2595,12 @@ function Library:CreateWindow(cfg)
                                         pj:Add(function() arrow.Text = "▾" end)
                                         currentPopupJanitor = pj
 
-                                        -- Show catcher next frame so the opening tap doesn't close it
-                                        task.defer(function()
-                                                catcher.Visible = true
+                                        -- Show catcher after 0.2s so the opening tap's release
+                                        -- doesn't immediately close the dropdown
+                                        task.delay(0.2, function()
+                                                if currentPopupJanitor == pj then
+                                                        catcher.Visible = true
+                                                end
                                         end)
                                 end
 

@@ -1917,13 +1917,11 @@ function Library:CreateWindow(cfg)
                 -- TextService:GetTextSize computes the exact pixel width
                 -- synchronously, before the button is even created, so there's
                 -- no layout race to lose: Size is correct from frame one.
-                local btnText = (icon or "") .. "  " .. name
-                -- [FIX] Use fixed comfortable width + TextScaled fallback.
-                -- TextService:GetTextSize + exact sizing was causing invisible text
-                -- due to subpixel clipping. Fixed 100px width with center alignment
-                -- is reliable across all devices.
-                btn.Size = UDim2.new(0, 100, 1, -10)
-                btn.Position = UDim2.new(0, 0, 0, 5)
+                local btnText = (icon or "") .. " " .. name
+                -- [FIX] Fixed 95px width (matches V9 working version), plain text
+                -- No RichText, no TextService:GetTextSize, no AutomaticSize
+                btn.Size = UDim2.new(0, 95, 1, -6)
+                btn.Position = UDim2.new(0, 0, 0, 3)
                 btn.BackgroundColor3 = C.tabChip
                 btn.AutoButtonColor = false
                 btn.BorderSizePixel = 0
@@ -1978,19 +1976,17 @@ function Library:CreateWindow(cfg)
                         if ActiveTab and ActiveTab ~= tab then
                                 local prev = ActiveTab
                                 prev.Page.Visible = false
-                                prev.Btn.BackgroundTransparency = 0
                                 Tween(prev.Btn, T20, { BackgroundColor3 = C.tabChip })
                                 Tween(prev._chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
                                 Tween(prev._iconLbl, T20, { TextColor3 = C.text })
                         end
                         ActiveTab = tab
                         tab.Page.Visible = true
-                        Tween(btn, T20, { BackgroundTransparency = 1 })
+                        -- [FIX] Active tab: accent dim background + accent hi text (matches V9)
+                        Tween(btn, T20, { BackgroundColor3 = C.accentDim, BackgroundTransparency = 0 })
                         Tween(chipStroke, T20, { Transparency = 1 })
                         Tween(iconLbl, T20, { TextColor3 = C.accentHi })
                         moveIndicatorTo(btn, not skipAnim)
-                        -- [FIX] Removed rotation/pop animation (was for separate icon label,
-                        -- now iconLbl=btn so rotating would rotate the whole button)
                 end
                 tab._chipStroke = chipStroke
                 tab._iconLbl = iconLbl
@@ -2951,11 +2947,19 @@ function Library:CreateWindow(cfg)
                                         end)
                                 end
 
-                        holder.InputBegan:Connect(function(inp)
-                                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                                        or inp.UserInputType == Enum.UserInputType.Touch then
-                                        openList()
-                                end
+                        -- [FIX] Use TextButton overlay instead of holder.InputBegan
+                        -- Frames don't consume touch on mobile, causing the dropdown freeze
+                        local ddHit = Instance.new("TextButton")
+                        ddHit.Size = UDim2.new(1, 0, 1, 0)
+                        ddHit.BackgroundTransparency = 1
+                        ddHit.Text = ""
+                        ddHit.AutoButtonColor = false
+                        ddHit.BorderSizePixel = 0
+                        ddHit.ZIndex = 10
+                        ddHit.Parent = holder
+
+                        ddHit.Activated:Connect(function()
+                                openList()
                         end)
 
                         function obj:Set(optionOrList, silent)

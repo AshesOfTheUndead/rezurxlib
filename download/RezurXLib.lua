@@ -1575,7 +1575,8 @@ function Library:CreateWindow(cfg)
                 local btnText = (icon or "") .. "  " .. name
                 local CHIP_PAD = 14
                 local textSize = TextService:GetTextSize(btnText, 12, Enum.Font.GothamBold, Vector2.new(1000, TABBAR_H))
-                local chipWidth = textSize.X + CHIP_PAD * 2
+                -- [FIX] Add 8px extra margin to prevent text clipping from UIPadding rounding
+                local chipWidth = textSize.X + CHIP_PAD * 2 + 8
                 btn.Size = UDim2.new(0, chipWidth, 1, -10)
                 btn.Position = UDim2.new(0, 0, 0, 5)
                 btn.BackgroundColor3 = C.tabChip
@@ -1584,10 +1585,12 @@ function Library:CreateWindow(cfg)
                 btn.Text = btnText
                 btn.Font = Enum.Font.GothamBold
                 btn.TextSize = 12
-                btn.TextColor3 = C.textDim
+                -- [FIX] Use C.text (brighter) instead of C.textDim so text is visible
+                btn.TextColor3 = C.text
+                btn.TextXAlignment = Enum.TextXAlignment.Center
                 btn.ZIndex = 4
                 btn.Parent = tabBar
-                pad(btn, 0, 0, CHIP_PAD, CHIP_PAD)
+                -- [FIX] Removed pad() — UIPadding was clipping text. Extra width margin above handles spacing.
                 corner(btn, R.tab)
                 local chipStroke = stroke(btn, C.borderAcc, 1)
                 -- Keep refs for setActive color tweens
@@ -1634,7 +1637,7 @@ function Library:CreateWindow(cfg)
                                 prev.Btn.BackgroundTransparency = 0
                                 Tween(prev.Btn, T20, { BackgroundColor3 = C.tabChip })
                                 Tween(prev._chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
-                                Tween(prev._iconLbl, T20, { TextColor3 = C.textDim })
+                                Tween(prev._iconLbl, T20, { TextColor3 = C.text })
                         end
                         ActiveTab = tab
                         tab.Page.Visible = true
@@ -1657,7 +1660,7 @@ function Library:CreateWindow(cfg)
                         else
                                 Tween(btn, T20, { BackgroundColor3 = C.tabChip })
                                 Tween(chipStroke, T20, { Color = C.borderAcc })
-                                Tween(btn, T20, { TextColor3 = C.textDim })
+                                Tween(btn, T20, { TextColor3 = C.text })
                         end
                 end)
 
@@ -1672,7 +1675,7 @@ function Library:CreateWindow(cfg)
                         if ActiveTab ~= tab then
                                 Tween(btn, T10, { BackgroundColor3 = C.tabChip })
                                 Tween(chipStroke, T10, { Color = C.borderAcc })
-                                Tween(btn, T10, { TextColor3 = C.textDim })
+                                Tween(btn, T10, { TextColor3 = C.text })
                         end
                 end)
                 btn.MouseButton1Click:Connect(function()
@@ -2427,15 +2430,6 @@ function Library:CreateWindow(cfg)
                                         closeCurrentPopup()
                                         arrow.Text = "▴"
 
-                                        local catcher = Instance.new("TextButton")
-                                        catcher.Size = UDim2.new(1, 0, 1, 0)
-                                        catcher.BackgroundTransparency = 1
-                                        catcher.Text = ""
-                                        catcher.AutoButtonColor = false
-                                        catcher.Active = true
-                                        catcher.ZIndex = 8
-                                        catcher.Parent = screenGui
-
                                         local hPos, hSize = holder.AbsolutePosition, holder.AbsoluteSize
                                         -- [FIX] Account for UIScale — AbsolutePosition is already scaled,
                                         -- but popup is in screenGui which scales AGAIN. Divide by scale.
@@ -2580,6 +2574,20 @@ function Library:CreateWindow(cfg)
                                                 end)
                                         end
 
+                                        -- [FIX] Create catcher DEFERRED so the opening tap doesn't
+                                        -- immediately trigger closeCurrentPopup. On mobile, the same
+                                        -- touch that opened the list would fire catcher.MouseButton1Click
+                                        -- on release, closing it instantly — looked like "nothing happens."
+                                        local catcher = Instance.new("TextButton")
+                                        catcher.Size = UDim2.new(1, 0, 1, 0)
+                                        catcher.BackgroundTransparency = 1
+                                        catcher.Text = ""
+                                        catcher.AutoButtonColor = false
+                                        catcher.Active = true
+                                        catcher.ZIndex = 8
+                                        catcher.Visible = false  -- hidden until deferred
+                                        catcher.Parent = screenGui
+
                                         catcher.MouseButton1Click:Connect(closeCurrentPopup)
 
                                         local pj = Janitor.new()
@@ -2587,6 +2595,11 @@ function Library:CreateWindow(cfg)
                                         pj:Add(list)
                                         pj:Add(function() arrow.Text = "▾" end)
                                         currentPopupJanitor = pj
+
+                                        -- Show catcher next frame so the opening tap doesn't close it
+                                        task.defer(function()
+                                                catcher.Visible = true
+                                        end)
                                 end
 
                         holder.InputBegan:Connect(function(inp)

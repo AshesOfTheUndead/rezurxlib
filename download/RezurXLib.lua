@@ -1933,7 +1933,6 @@ function Library:CreateWindow(cfg)
                 btn.TextColor3 = C.text
                 btn.TextXAlignment = Enum.TextXAlignment.Center
                 btn.TextTruncate = Enum.TextTruncate.AtEnd
-                btn.RichText = true
                 btn.ZIndex = 4
                 btn.Parent = tabBar
                 corner(btn, R.tab)
@@ -2924,15 +2923,18 @@ function Library:CreateWindow(cfg)
                                         -- task.defer was too fast — touch release could still fire after.
                                         local catcher = Instance.new("TextButton")
                                         catcher.Size = UDim2.new(1, 0, 1, 0)
-                                        catcher.BackgroundTransparency = 1
+                                        -- [FIX] BackgroundTransparency = 0.99 (not 1.0) — fully transparent
+                                        -- buttons don't receive touch events on mobile, freezing the UI
+                                        catcher.BackgroundTransparency = 0.99
                                         catcher.Text = ""
                                         catcher.AutoButtonColor = false
                                         catcher.Active = true
                                         catcher.ZIndex = 8
-                                        catcher.Visible = false  -- hidden until delay
+                                        catcher.Visible = false
                                         catcher.Parent = screenGui
 
-                                        catcher.MouseButton1Click:Connect(closeCurrentPopup)
+                                        -- [FIX] Use Activated (works on touch + mouse) instead of MouseButton1Click
+                                        catcher.Activated:Connect(closeCurrentPopup)
 
                                         local pj = Janitor.new()
                                         pj:Add(catcher)
@@ -3200,7 +3202,7 @@ function Library:CreateWindow(cfg)
                                 local catcher = Instance.new("TextButton")
                                 catcher.Size = UDim2.new(1, 0, 1, 0)
                                 catcher.BackgroundColor3 = C.black
-                                catcher.BackgroundTransparency = 1
+                                catcher.BackgroundTransparency = 0.99
                                 catcher.Text = ""
                                 catcher.AutoButtonColor = false
                                 catcher.Active = true
@@ -3404,8 +3406,8 @@ function Library:CreateWindow(cfg)
                                 -- never tracked, so opening a different popup while the color
                                 -- picker was open left its full-screen catcher + panel stuck on
                                 -- screen permanently. Same Janitor fix applied here.
-                                doneBtn.MouseButton1Click:Connect(closeCurrentPopup)
-                                catcher.MouseButton1Click:Connect(closeCurrentPopup)
+                                doneBtn.Activated:Connect(closeCurrentPopup)
+                                catcher.Activated:Connect(closeCurrentPopup)
 
                                 local pj = Janitor.new()
                                 pj:Add(catcher)
@@ -4001,7 +4003,7 @@ function Library:CreateWindow(cfg)
                                 local catcher = Instance.new("TextButton")
                                 catcher.Name = "ContextMenuBackdrop"
                                 catcher.Size = UDim2.new(1, 0, 1, 0)
-                                catcher.BackgroundTransparency = 1
+                                catcher.BackgroundTransparency = 0.99
                                 catcher.BorderSizePixel = 0
                                 catcher.AutoButtonColor = false
                                 catcher.Text = ""

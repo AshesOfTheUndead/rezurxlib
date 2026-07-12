@@ -17,20 +17,20 @@
 
 -- ═══ Load RezurXLib from GitHub ═══
 local Lib
-local LIB_URL = "https://raw.githubusercontent.com/AshesOfTheUndead/rayfield-ui-clone/main/RezurXLib.lua"
+-- [FIX] Cache-buster: append tick() to URL so executor doesn't return cached old version
+local LIB_URL = "https://raw.githubusercontent.com/AshesOfTheUndead/rayfield-ui-clone/main/RezurXLib.lua?t=" .. tostring(tick())
 local ok, src = pcall(function() return game:HttpGet(LIB_URL) end)
 if ok and src and #src > 100 then
-    src = src:gsub("self%._n %+= 1", "self._n = self._n + 1")
     local fn, err = loadstring(src)
     if fn then Lib = fn() end
 end
 if not Lib then
     pcall(function()
-	game:GetService("StarterGui"):SetCore("SendNotification", {
-	    Title = "DOMINUS V8 Error",
-	    Text = "Failed to load RezurXLib. Check internet or executor.",
-	    Duration = 10,
-	})
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = "DOMINUS V8 Error",
+            Text = "Failed to load RezurXLib. Check internet or executor.",
+            Duration = 10,
+        })
     end)
     return
 end
@@ -69,12 +69,12 @@ local function debounce(fn, delay)
     local lastVal = nil
     local pending = false
     return function(...)
-	local args = {...}
-	local now = tick()
-	if now - lastCall >= (delay or 0.1) then
-	    lastCall = now
-	    fn(unpack(args))
-	end
+        local args = {...}
+        local now = tick()
+        if now - lastCall >= (delay or 0.1) then
+            lastCall = now
+            fn(unpack(args))
+        end
     end
 end
 
@@ -107,16 +107,16 @@ initAllRemotes = function()
     if remoteMutex then return end
     remoteMutex = true
     pcall(function()
-	local tsRoot=ReplicatedStorage:FindFirstChild("TrainSystem") local tsRem=tsRoot and tsRoot:FindFirstChild("Remote")
-	if tsRem then Remotes.ApplyAddFrenzyValue=tsRem:FindFirstChild("ApplyAddFrenzyValue") Remotes.TrainSpeedHasChanged=tsRem:FindFirstChild("TrainSpeedHasChanged") end
-	local teRoot=ReplicatedStorage:FindFirstChild("TrainEquipment") local teRem=teRoot and teRoot:FindFirstChild("Remote")
-	if teRem then Remotes.ApplyMobileTrain=teRem:FindFirstChild("ApplyMobileTrain") Remotes.ApplyStationaryTrain=teRem:FindFirstChild("ApplyStationaryTrain") end
-	local tc=ReplicatedStorage:FindFirstChild("TextChat") local tcRem=tc and tc:FindFirstChild("Remote")
-	if tcRem then Remotes.SendTextChatMessage=tcRem:FindFirstChild("SendTextChatMessageToAllPlayer") end
-	local ab=ReplicatedStorage:FindFirstChild("Ability") local abRem=ab and ab:FindFirstChild("Remote")
-	if abRem then Remotes.ApplyCastAbility=abRem:FindFirstChild("ApplyCastAbility") end
-	local ar=ReplicatedStorage:FindFirstChild("Area") local arRem=ar and ar:FindFirstChild("Remote")
-	if arRem then Remotes.PlayerAreaIn=arRem:FindFirstChild("PlayerAreaIn") end
+        local tsRoot=ReplicatedStorage:FindFirstChild("TrainSystem") local tsRem=tsRoot and tsRoot:FindFirstChild("Remote")
+        if tsRem then Remotes.ApplyAddFrenzyValue=tsRem:FindFirstChild("ApplyAddFrenzyValue") Remotes.TrainSpeedHasChanged=tsRem:FindFirstChild("TrainSpeedHasChanged") end
+        local teRoot=ReplicatedStorage:FindFirstChild("TrainEquipment") local teRem=teRoot and teRoot:FindFirstChild("Remote")
+        if teRem then Remotes.ApplyMobileTrain=teRem:FindFirstChild("ApplyMobileTrain") Remotes.ApplyStationaryTrain=teRem:FindFirstChild("ApplyStationaryTrain") end
+        local tc=ReplicatedStorage:FindFirstChild("TextChat") local tcRem=tc and tc:FindFirstChild("Remote")
+        if tcRem then Remotes.SendTextChatMessage=tcRem:FindFirstChild("SendTextChatMessageToAllPlayer") end
+        local ab=ReplicatedStorage:FindFirstChild("Ability") local abRem=ab and ab:FindFirstChild("Remote")
+        if abRem then Remotes.ApplyCastAbility=abRem:FindFirstChild("ApplyCastAbility") end
+        local ar=ReplicatedStorage:FindFirstChild("Area") local arRem=ar and ar:FindFirstChild("Remote")
+        if arRem then Remotes.PlayerAreaIn=arRem:FindFirstChild("PlayerAreaIn") end
     end)
     remoteMutex = false
 end
@@ -170,20 +170,20 @@ executePump = function(speed)
     if not Remotes.ApplyAddFrenzyValue then return end
     local r=Remotes
     local calls={
-	{f="I",r=r.ApplyAddFrenzyValue,a={10000}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
-	{f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
-	{f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
-	{f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
-	{f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
-	{f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
-	{f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
-	{f="I",r=r.ApplyAddFrenzyValue,a={10000}},
+        {f="I",r=r.ApplyAddFrenzyValue,a={10000}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+        {f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
+        {f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+        {f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
+        {f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+        {f="I",r=r.ApplyMobileTrain,a={speed}},{f="I",r=r.ApplyStationaryTrain,a={speed}},
+        {f="I",r=r.ApplyStationaryTrain,a={speed}},{f="F",r=r.TrainSpeedHasChanged,a={speed}},
+        {f="I",r=r.ApplyAddFrenzyValue,a={10000}},
     }
     for _,c in ipairs(calls) do
-	if c.r then
-	    if c.f=="I" then pcall(c.r.InvokeServer, c.r, unpack(c.a))
-	    else pcall(c.r.FireServer, c.r, unpack(c.a)) end
-	end
+        if c.r then
+            if c.f=="I" then pcall(c.r.InvokeServer, c.r, unpack(c.a))
+            else pcall(c.r.FireServer, c.r, unpack(c.a)) end
+        end
     end
 end
 
@@ -191,13 +191,13 @@ local workerGeneration=0 local activeWorkers=0
 local function spawnWorkers(n)
     workerGeneration=workerGeneration+1 local gen=workerGeneration activeWorkers=n
     for i=1,n do local wid=i
-	task.spawn(function()
-	    task.wait((wid-1)*0.002)
-	    while gen==workerGeneration and Config.FarmEnabled do
-		local sp=getTrainSpeed() if hybridState.emergencyMode then sp=1e9 end
-		pcall(executePump, sp) task.wait(0.001)
-	    end
-	end)
+        task.spawn(function()
+            task.wait((wid-1)*0.002)
+            while gen==workerGeneration and Config.FarmEnabled do
+                local sp=getTrainSpeed() if hybridState.emergencyMode then sp=1e9 end
+                pcall(executePump, sp) task.wait(0.001)
+            end
+        end)
     end
 end
 local function killWorkers() workerGeneration=workerGeneration+1 activeWorkers=0 end
@@ -206,22 +206,22 @@ local adaptiveConn=nil
 local function startAdaptiveThrottle()
     if adaptiveConn then adaptiveConn:Disconnect() end
     adaptiveConn=RunService.Heartbeat:Connect(function()
-	local now=tick() if now-hybridState.lastAdjust<2 then return end
-	hybridState.lastAdjust=now
-	local fc=0 local c2=RunService.Heartbeat:Connect(function() fc=fc+1 end) task.wait(0.5) c2:Disconnect()
-	local fps=math.floor(fc/0.5)
-	table.insert(hybridState.fpsHistory,fps) if #hybridState.fpsHistory>5 then table.remove(hybridState.fpsHistory,1) end
-	local af=0 for _,v in ipairs(hybridState.fpsHistory) do af=af+v end af=af/#hybridState.fpsHistory
-	local tr=powerTracker.trend() local old=hybridState.currentWorkers
-	if af<15 then hybridState.emergencyMode=true hybridState.currentWorkers=1
-	elseif af<25 then hybridState.emergencyMode=false hybridState.currentWorkers=math.max(1,hybridState.currentWorkers-1)
-	elseif tr=="down" and hybridState.currentWorkers>2 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers-1
-	elseif tr=="up" and af>50 and hybridState.currentWorkers<1000 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers+1
-	elseif tr=="flat" and af>50 and hybridState.currentWorkers<500 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers+1
-	end
-	if hybridState.currentWorkers~=old and Config.FarmEnabled and Config.FarmMode=="Hybrid" then
-	    killWorkers() task.wait(0.05) spawnWorkers(hybridState.currentWorkers)
-	end
+        local now=tick() if now-hybridState.lastAdjust<2 then return end
+        hybridState.lastAdjust=now
+        local fc=0 local c2=RunService.Heartbeat:Connect(function() fc=fc+1 end) task.wait(0.5) c2:Disconnect()
+        local fps=math.floor(fc/0.5)
+        table.insert(hybridState.fpsHistory,fps) if #hybridState.fpsHistory>5 then table.remove(hybridState.fpsHistory,1) end
+        local af=0 for _,v in ipairs(hybridState.fpsHistory) do af=af+v end af=af/#hybridState.fpsHistory
+        local tr=powerTracker.trend() local old=hybridState.currentWorkers
+        if af<15 then hybridState.emergencyMode=true hybridState.currentWorkers=1
+        elseif af<25 then hybridState.emergencyMode=false hybridState.currentWorkers=math.max(1,hybridState.currentWorkers-1)
+        elseif tr=="down" and hybridState.currentWorkers>2 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers-1
+        elseif tr=="up" and af>50 and hybridState.currentWorkers<1000 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers+1
+        elseif tr=="flat" and af>50 and hybridState.currentWorkers<500 then hybridState.emergencyMode=false hybridState.currentWorkers=hybridState.currentWorkers+1
+        end
+        if hybridState.currentWorkers~=old and Config.FarmEnabled and Config.FarmMode=="Hybrid" then
+            killWorkers() task.wait(0.05) spawnWorkers(hybridState.currentWorkers)
+        end
     end)
 end
 local function stopAdaptiveThrottle() if adaptiveConn then adaptiveConn:Disconnect() adaptiveConn=nil end end
@@ -231,12 +231,12 @@ startFarm = function()
     if farmConn then farmConn:Disconnect() farmConn=nil end
     stopAdaptiveThrottle() powerTracker.startSession()
     if Config.FarmMode=="Hybrid" then
-	hybridState.currentWorkers=math.max(1,math.min(1000,Config.WorkerCount*Config.FarmSpeedMul))
-	if Config.TurboActive then hybridState.currentWorkers=math.min(1000,hybridState.currentWorkers*2) end
-	hybridState.emergencyMode=false hybridState.fpsHistory={}
-	spawnWorkers(hybridState.currentWorkers) startAdaptiveThrottle()
+        hybridState.currentWorkers=math.max(1,math.min(1000,Config.WorkerCount*Config.FarmSpeedMul))
+        if Config.TurboActive then hybridState.currentWorkers=math.min(1000,hybridState.currentWorkers*2) end
+        hybridState.emergencyMode=false hybridState.fpsHistory={}
+        spawnWorkers(hybridState.currentWorkers) startAdaptiveThrottle()
     else
-	farmConn=RunService.Heartbeat:Connect(function() safeCall("farm",function() pcall(executePump,getTrainSpeed()) end) end)
+        farmConn=RunService.Heartbeat:Connect(function() safeCall("farm",function() pcall(executePump,getTrainSpeed()) end) end)
     end
 end
 stopFarm = function()
@@ -253,12 +253,12 @@ startOvernight = function()
     Config.TurboActive=false Config.TurboUntil=0 Config.FarmEnabled=true startFarm()
     local cs=tick() local lfc=tick() local fls=0
     overnightConn=RunService.Heartbeat:Connect(function()
-	local now=tick()
-	if now-lfc>=5 then lfc=now local fc=0 local c2=RunService.Heartbeat:Connect(function() fc=fc+1 end) task.wait(0.5) c2:Disconnect()
-	local fps=math.floor(fc/0.5)
-	if fps<15 then fls=fls+1 if fls>=2 then killWorkers() task.delay(120,function() if Config.OvernightEnabled then cs=tick() spawnWorkers(3) end end) end
-	else fls=0 end end
-	if now-cs>=300 then killWorkers() collectgarbage("collect") task.delay(30,function() if Config.OvernightEnabled then cs=tick() spawnWorkers(3) end end) end
+        local now=tick()
+        if now-lfc>=5 then lfc=now local fc=0 local c2=RunService.Heartbeat:Connect(function() fc=fc+1 end) task.wait(0.5) c2:Disconnect()
+        local fps=math.floor(fc/0.5)
+        if fps<15 then fls=fls+1 if fls>=2 then killWorkers() task.delay(120,function() if Config.OvernightEnabled then cs=tick() spawnWorkers(3) end end) end
+        else fls=0 end end
+        if now-cs>=300 then killWorkers() collectgarbage("collect") task.delay(30,function() if Config.OvernightEnabled then cs=tick() spawnWorkers(3) end end) end
     end)
 end
 stopOvernight = function()
@@ -276,9 +276,9 @@ setTurbo = function()
     notify("🚀 TURBO", "2x for 10s!", 3, "success")
     if Config.FarmMode=="Hybrid" and Config.FarmEnabled then task.spawn(function() killWorkers() task.wait(0.05) spawnWorkers(math.min(1000,hybridState.currentWorkers*2)) end) end
     task.spawn(function()
-	while Config.TurboActive and tick()<Config.TurboUntil do task.wait(0.5) end
-	Config.TurboActive=false Config.TurboCooldownUntil=tick()+5
-	if Config.FarmMode=="Hybrid" and Config.FarmEnabled then task.spawn(function() killWorkers() task.wait(0.05) spawnWorkers(hybridState.currentWorkers) end) end
+        while Config.TurboActive and tick()<Config.TurboUntil do task.wait(0.5) end
+        Config.TurboActive=false Config.TurboCooldownUntil=tick()+5
+        if Config.FarmMode=="Hybrid" and Config.FarmEnabled then task.spawn(function() killWorkers() task.wait(0.05) spawnWorkers(hybridState.currentWorkers) end) end
     end)
 end
 
@@ -314,16 +314,16 @@ setNoclipMode = function(en)
     if noclipCharConn then noclipCharConn:Disconnect() noclipCharConn=nil end
     if not en then return end
     local function start()
-	if Config.NoclipMode=="V777" then
-	    noclipConn=RunService.Stepped:Connect(function()
-		local ch=player.Character if ch then for _,v in pairs(ch:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide=false end end end
-	    end)
-	else
-	    noclipConn=RunService.Stepped:Connect(function()
-		local ch=player.Character if not ch then return end
-		for _,v in ipairs(ch:GetDescendants()) do if v:IsA("BasePart") and v.CanCollide and v.Name~="HumanoidRootPart" then v.CanCollide=false end end
-	    end)
-	end
+        if Config.NoclipMode=="V777" then
+            noclipConn=RunService.Stepped:Connect(function()
+                local ch=player.Character if ch then for _,v in pairs(ch:GetDescendants()) do if v:IsA("BasePart") then v.CanCollide=false end end end
+            end)
+        else
+            noclipConn=RunService.Stepped:Connect(function()
+                local ch=player.Character if not ch then return end
+                for _,v in ipairs(ch:GetDescendants()) do if v:IsA("BasePart") and v.CanCollide and v.Name~="HumanoidRootPart" then v.CanCollide=false end end
+            end)
+        end
     end
     start()
     noclipCharConn=player.CharacterAdded:Connect(function() task.wait(0.3) if Config.NoclipEnabled then if noclipConn then noclipConn:Disconnect() noclipConn=nil end start() end end)
@@ -346,9 +346,9 @@ end)
 player.CharacterAdded:Connect(function(char)
     local h=char:WaitForChild("Humanoid",5)
     if h then
-	h.Died:Connect(function() if Config.FarmEnabled and Config.FarmMode=="Hybrid" then killWorkers() end end)
-	if Config.OverrideStats then task.wait(0.2) applyMovement() end
-	if Config.FarmEnabled and Config.FarmMode=="Hybrid" then task.wait(0.5) if Config.FarmEnabled then spawnWorkers(math.max(1,math.min(1000,hybridState.currentWorkers))) end end
+        h.Died:Connect(function() if Config.FarmEnabled and Config.FarmMode=="Hybrid" then killWorkers() end end)
+        if Config.OverrideStats then task.wait(0.2) applyMovement() end
+        if Config.FarmEnabled and Config.FarmMode=="Hybrid" then task.wait(0.5) if Config.FarmEnabled then spawnWorkers(math.max(1,math.min(1000,hybridState.currentWorkers))) end end
     end
 end)
 player.Idled:Connect(function()
@@ -357,24 +357,24 @@ player.Idled:Connect(function()
 end)
 task.spawn(function()
     while task.wait(0.2) do
-	if Config.PvpOff then
-	    safeCall("pvp",function()
-		local ar=workspace:FindFirstChild("Area") local pa=ar and ar:FindFirstChild("PlayerArea") local s2=pa and pa:FindFirstChild("S2")
-		if s2 and Remotes.PlayerAreaIn then Remotes.PlayerAreaIn:InvokeServer(s2) end
-		if Remotes.PlayerAreaIn then
-		    for _,child in ipairs(workspace:GetChildren()) do
-			if child.Name=="Area" then
-			    for _,sub in ipairs(child:GetDescendants()) do
-				if sub.Name:lower():find("safe") or sub.Name:lower():find("s2") or sub.Name:lower():find("no") then
-				    pcall(function() Remotes.PlayerAreaIn:InvokeServer(sub) end)
-				end
-			    end
-			end
-		    end
-		end
-		if not Remotes.PlayerAreaIn then healRemotesWithBackoff() end
-	    end)
-	end
+        if Config.PvpOff then
+            safeCall("pvp",function()
+                local ar=workspace:FindFirstChild("Area") local pa=ar and ar:FindFirstChild("PlayerArea") local s2=pa and pa:FindFirstChild("S2")
+                if s2 and Remotes.PlayerAreaIn then Remotes.PlayerAreaIn:InvokeServer(s2) end
+                if Remotes.PlayerAreaIn then
+                    for _,child in ipairs(workspace:GetChildren()) do
+                        if child.Name=="Area" then
+                            for _,sub in ipairs(child:GetDescendants()) do
+                                if sub.Name:lower():find("safe") or sub.Name:lower():find("s2") or sub.Name:lower():find("no") then
+                                    pcall(function() Remotes.PlayerAreaIn:InvokeServer(sub) end)
+                                end
+                            end
+                        end
+                    end
+                end
+                if not Remotes.PlayerAreaIn then healRemotesWithBackoff() end
+            end)
+        end
     end
 end)
 
@@ -417,16 +417,16 @@ UI.Workers = FarmTab:CreateSlider({
     CurrentValue = 50,
     Suffix = "",
     Callback = function(v)
-	Config.WorkerCount = v
-	if Config.FarmEnabled and Config.FarmMode=="Hybrid" then
-	    task.spawn(function()
-		killWorkers()
-		local n=math.max(1,math.min(1000,v*Config.FarmSpeedMul))
-		if Config.TurboActive then n=math.min(1000,n*2) end
-		hybridState.currentWorkers=n
-		spawnWorkers(n)
-	    end)
-	end
+        Config.WorkerCount = v
+        if Config.FarmEnabled and Config.FarmMode=="Hybrid" then
+            task.spawn(function()
+                killWorkers()
+                local n=math.max(1,math.min(1000,v*Config.FarmSpeedMul))
+                if Config.TurboActive then n=math.min(1000,n*2) end
+                hybridState.currentWorkers=n
+                spawnWorkers(n)
+            end)
+        end
     end,
 })
 local function mulToStr(m) if m==0.5 then return "0.5x" elseif m==2 then return "2x" else return "1x" end end
@@ -435,7 +435,7 @@ UI.FarmSpeedMul = FarmTab:CreateDropdown({
     Options = {"0.5x", "1x", "2x"},
     CurrentOption = "1x",
     Callback = function(v)
-	if v=="0.5x" then Config.FarmSpeedMul=0.5 elseif v=="2x" then Config.FarmSpeedMul=2 else Config.FarmSpeedMul=1 end
+        if v=="0.5x" then Config.FarmSpeedMul=0.5 elseif v=="2x" then Config.FarmSpeedMul=2 else Config.FarmSpeedMul=1 end
     end,
 })
 FarmTab:CreateSection("⚙️ OPTIONS")
@@ -445,11 +445,11 @@ local farmToggle = FarmTab:CreateToggle({
     Name = "▶️ FARM: OFF",
     CurrentValue = false,
     Callback = function(t)
-	task.spawn(function()
-	    Config.FarmEnabled = t
-	    farmToggle:SetLabel(t and "▶️ FARM: ON" or "▶️ FARM: OFF")
-	    if t then startFarm() else stopFarm() end
-	end)
+        task.spawn(function()
+            Config.FarmEnabled = t
+            farmToggle:SetLabel(t and "▶️ FARM: ON" or "▶️ FARM: OFF")
+            if t then startFarm() else stopFarm() end
+        end)
     end,
 })
 FarmTab:CreateButton({Name = "🚀 TURBO BOOST", Callback = function() task.spawn(setTurbo) end})
@@ -463,10 +463,10 @@ FarmTab:CreateSection("📊 LIVE STATS")
 local statsP = FarmTab:CreateParagraph({Title = "📊 Power Tracker", Content = "Start farm..."})
 task.spawn(function()
     while task.wait(1) do
-	local power=powerTracker.tick() local gains=powerTracker.avgGainsPerSec() local trend=powerTracker.trend()
-	local ti=trend=="up" and "📈" or (trend=="down" and "📉" or "➡️")
-	local st=powerTracker.sessionStart>0 and math.floor(tick()-powerTracker.sessionStart) or 0
-	pcall(function() statsP:Set({Content="Power: "..formatNumber(power).."  |  "..ti.." "..formatNumber(gains).."/s  |  "..st.."s  |  "..activeWorkers.."W"}) end)
+        local power=powerTracker.tick() local gains=powerTracker.avgGainsPerSec() local trend=powerTracker.trend()
+        local ti=trend=="up" and "📈" or (trend=="down" and "📉" or "➡️")
+        local st=powerTracker.sessionStart>0 and math.floor(tick()-powerTracker.sessionStart) or 0
+        pcall(function() statsP:Set({Content="Power: "..formatNumber(power).."  |  "..ti.." "..formatNumber(gains).."/s  |  "..st.."s  |  "..activeWorkers.."W"}) end)
     end
 end)
 
@@ -477,9 +477,9 @@ local ot = MoveTab:CreateToggle({
     Name = "🔧 Override Stats: OFF",
     CurrentValue = false,
     Callback = function(t)
-	Config.OverrideStats = t
-	ot:SetLabel(t and "🔧 Override Stats: ON" or "🔧 Override Stats: OFF")
-	if t then applyMovement() else restoreMovement() end
+        Config.OverrideStats = t
+        ot:SetLabel(t and "🔧 Override Stats: ON" or "🔧 Override Stats: OFF")
+        if t then applyMovement() else restoreMovement() end
     end,
 })
 UI.OverrideStats = ot
@@ -498,9 +498,9 @@ local noclipToggle = MoveTab:CreateToggle({
     Name = "👻 Noclip: OFF",
     CurrentValue = false,
     Callback = function(t)
-	Config.NoclipEnabled = t
-	task.spawn(function() setNoclipMode(t) end)
-	noclipToggle:SetLabel(t and "👻 Noclip: ON" or "👻 Noclip: OFF")
+        Config.NoclipEnabled = t
+        task.spawn(function() setNoclipMode(t) end)
+        noclipToggle:SetLabel(t and "👻 Noclip: ON" or "👻 Noclip: OFF")
     end,
 })
 UI.Noclip = noclipToggle
@@ -539,8 +539,8 @@ local pvpToggle = LabTab:CreateToggle({
     Name = "⚔️ PVP: OFF (Safe)",
     CurrentValue = true,
     Callback = function(t)
-	Config.PvpOff = t
-	pvpToggle:SetLabel(t and "⚔️ PVP: OFF (Safe)" or "⚔️ PVP: ON (Danger)")
+        Config.PvpOff = t
+        pvpToggle:SetLabel(t and "⚔️ PVP: OFF (Safe)" or "⚔️ PVP: ON (Danger)")
     end,
 })
 UI.PvpOff = pvpToggle
@@ -549,21 +549,21 @@ local function toggleESP(t)
     Config.EspEnabled=t
     if not t then clearEsp() return end
     espConn=RunService.RenderStepped:Connect(function()
-	pcall(function()
-	    local cr=workspace:FindFirstChild("Creature") local ac=cr and cr:FindFirstChild("Activation") if not ac then return end
-	    local seen={}
-	    for _,obj in ipairs(ac:GetChildren()) do for _,pm in ipairs(obj:GetChildren()) do
-		local h=pm:FindFirstChild("Head") if h then
-		    seen[h]=true local e=espCache[h] local pw=getPowerFor(pm.Name)
-		    if not e then
-			local bb=Instance.new("BillboardGui") bb.Name="RT" bb.Adornee=h bb.Size=UDim2.new(0,100,0,30) bb.StudsOffset=Vector3.new(0,3,0) bb.AlwaysOnTop=true bb.Parent=h
-			local l=Instance.new("TextLabel") l.Parent=bb l.Size=UDim2.new(1,0,1,0) l.BackgroundTransparency=1 l.TextColor3=Color3.new(1,1,1) l.TextStrokeTransparency=0 l.Font=Enum.Font.GothamBold l.TextSize=11 l.Text=formatNumber(pw)
-			espCache[h]={gui=bb,label=l,lastValue=pw}
-		    elseif e.lastValue~=pw then e.label.Text=formatNumber(pw) e.lastValue=pw end
-		end
-	    end end
-	    for h,e in pairs(espCache) do if not seen[h] or not h.Parent then if e.gui then e.gui:Destroy() end espCache[h]=nil end end
-	end)
+        pcall(function()
+            local cr=workspace:FindFirstChild("Creature") local ac=cr and cr:FindFirstChild("Activation") if not ac then return end
+            local seen={}
+            for _,obj in ipairs(ac:GetChildren()) do for _,pm in ipairs(obj:GetChildren()) do
+                local h=pm:FindFirstChild("Head") if h then
+                    seen[h]=true local e=espCache[h] local pw=getPowerFor(pm.Name)
+                    if not e then
+                        local bb=Instance.new("BillboardGui") bb.Name="RT" bb.Adornee=h bb.Size=UDim2.new(0,100,0,30) bb.StudsOffset=Vector3.new(0,3,0) bb.AlwaysOnTop=true bb.Parent=h
+                        local l=Instance.new("TextLabel") l.Parent=bb l.Size=UDim2.new(1,0,1,0) l.BackgroundTransparency=1 l.TextColor3=Color3.new(1,1,1) l.TextStrokeTransparency=0 l.Font=Enum.Font.GothamBold l.TextSize=11 l.Text=formatNumber(pw)
+                        espCache[h]={gui=bb,label=l,lastValue=pw}
+                    elseif e.lastValue~=pw then e.label.Text=formatNumber(pw) e.lastValue=pw end
+                end
+            end end
+            for h,e in pairs(espCache) do if not seen[h] or not h.Parent then if e.gui then e.gui:Destroy() end espCache[h]=nil end end
+        end)
     end)
 end
 UI.Esp = LabTab:CreateToggle({Name = "👁️ ESP", CurrentValue = false, Callback = function(t) toggleESP(t) end})
@@ -576,23 +576,23 @@ SysTab:CreateSection("💾 CONFIGS")
 local CONFIGS_FILE = "DOMINUS_Configs.json"
 local function buildProfile()
     return {
-	CustomTag=Config.CustomTag, UserName=Config.UserName,
-	TagColor={Config.TagColor.R,Config.TagColor.G,Config.TagColor.B},
-	UserColor={Config.UserColor.R,Config.UserColor.G,Config.UserColor.B},
-	MessageColor={Config.MessageColor.R,Config.MessageColor.G,Config.MessageColor.B},
-	FarmMode=Config.FarmMode, FarmSpeedMul=Config.FarmSpeedMul,
-	WorkerCount=Config.WorkerCount, MaxPerformance=Config.MaxPerformance,
-	TrainSpeedValue=Config.TrainSpeedValue, AntiDetect=Config.AntiDetect,
-	WalkSpeed=Config.WalkSpeed, JumpPower=Config.JumpPower,
-	OverrideStats=Config.OverrideStats, NoclipMode=Config.NoclipMode,
-	NoclipEnabled=Config.NoclipEnabled, AntiAfk=Config.AntiAfk,
-	PvpOff=Config.PvpOff,
+        CustomTag=Config.CustomTag, UserName=Config.UserName,
+        TagColor={Config.TagColor.R,Config.TagColor.G,Config.TagColor.B},
+        UserColor={Config.UserColor.R,Config.UserColor.G,Config.UserColor.B},
+        MessageColor={Config.MessageColor.R,Config.MessageColor.G,Config.MessageColor.B},
+        FarmMode=Config.FarmMode, FarmSpeedMul=Config.FarmSpeedMul,
+        WorkerCount=Config.WorkerCount, MaxPerformance=Config.MaxPerformance,
+        TrainSpeedValue=Config.TrainSpeedValue, AntiDetect=Config.AntiDetect,
+        WalkSpeed=Config.WalkSpeed, JumpPower=Config.JumpPower,
+        OverrideStats=Config.OverrideStats, NoclipMode=Config.NoclipMode,
+        NoclipEnabled=Config.NoclipEnabled, AntiAfk=Config.AntiAfk,
+        PvpOff=Config.PvpOff,
     }
 end
 
 local function applyProfile(p)
     local function safeSet(obj, val)
-	if obj and val ~= nil then pcall(function() obj:Set(val) end) end
+        if obj and val ~= nil then pcall(function() obj:Set(val) end) end
     end
     safeSet(UI.FarmMode, p.FarmMode)
     safeSet(UI.TrainSpeed, p.TrainSpeedValue)
@@ -665,109 +665,109 @@ SysTab:CreateButton({Name = "💾 Save Config (use name above)", Callback = func
     if not writefile then notify("❌ Error", "writefile not available", 4, "error") return end
     local name = nameInput:Get()
     if not name or name == "" or name == "(none)" then
-	notify("⚠️ Name Required", "Enter a config name in the input above first.", 4, "warning")
-	return
+        notify("⚠️ Name Required", "Enter a config name in the input above first.", 4, "warning")
+        return
     end
     local data = loadConfigsList()
     if data[name] then
-	notify("❌ Already Exists", "Config '"..name.."' already exists. Use a different name or delete it first.", 5, "error")
-	return
+        notify("❌ Already Exists", "Config '"..name.."' already exists. Use a different name or delete it first.", 5, "error")
+        return
     end
     data[name] = buildProfile()
     local ok = saveConfigsList(data)
     if ok then
-	notify("💾 Saved", "Config '"..name.."' saved successfully.", 4, "success")
-	refreshConfigs()
-	nameInput:Set("")
+        notify("💾 Saved", "Config '"..name.."' saved successfully.", 4, "success")
+        refreshConfigs()
+        nameInput:Set("")
     else
-	notify("❌ Save Failed", "Could not write to file.", 4, "error")
+        notify("❌ Save Failed", "Could not write to file.", 4, "error")
     end
 end})
 
 SysTab:CreateButton({Name = "📂 Load Selected Config", Callback = function()
     local sel = configDropdown:Get()
     if not sel or sel == "(none)" then
-	notify("⚠️ None Selected", "Select a config from the dropdown first.", 4, "warning")
-	return
+        notify("⚠️ None Selected", "Select a config from the dropdown first.", 4, "warning")
+        return
     end
     local data = loadConfigsList()
     if not data[sel] then
-	notify("❌ Not Found", "Config '"..sel.."' not found.", 4, "error")
-	return
+        notify("❌ Not Found", "Config '"..sel.."' not found.", 4, "error")
+        return
     end
     local ok, err = pcall(applyProfile, data[sel])
     if ok then
-	notify("📂 Loaded", "Config '"..sel.."' applied to all settings.", 4, "info")
+        notify("📂 Loaded", "Config '"..sel.."' applied to all settings.", 4, "info")
     else
-	notify("❌ Load Error", tostring(err):sub(1,60), 5, "error")
+        notify("❌ Load Error", tostring(err):sub(1,60), 5, "error")
     end
 end})
 
 SysTab:CreateButton({Name = "🗑️ Delete Selected Config", Callback = function()
     local sel = configDropdown:Get()
     if not sel or sel == "(none)" then
-	notify("⚠️ None Selected", "Select a config from the dropdown first.", 4, "warning")
-	return
+        notify("⚠️ None Selected", "Select a config from the dropdown first.", 4, "warning")
+        return
     end
     local data = loadConfigsList()
     if not data[sel] then
-	notify("❌ Not Found", "Config '"..sel.."' not found.", 4, "error")
-	return
+        notify("❌ Not Found", "Config '"..sel.."' not found.", 4, "error")
+        return
     end
     data[sel] = nil
     local ok = saveConfigsList(data)
     if ok then
-	notify("🗑️ Deleted", "Config '"..sel.."' deleted.", 4, "info")
-	refreshConfigs()
+        notify("🗑️ Deleted", "Config '"..sel.."' deleted.", 4, "info")
+        refreshConfigs()
     else
-	notify("❌ Delete Failed", "Could not write to file.", 4, "error")
+        notify("❌ Delete Failed", "Could not write to file.", 4, "error")
     end
 end})
 
 SysTab:CreateButton({Name = "✏️ Rename Selected Config", Callback = function()
     local sel = configDropdown:Get()
     if not sel or sel == "(none)" then
-	notify("⚠️ None Selected", "Select a config from the dropdown first.", 4, "warning")
-	return
+        notify("⚠️ None Selected", "Select a config from the dropdown first.", 4, "warning")
+        return
     end
     local newName = nameInput:Get()
     if not newName or newName == "" or newName == "(none)" then
-	notify("⚠️ Name Required", "Enter a new name in the input above first.", 4, "warning")
-	return
+        notify("⚠️ Name Required", "Enter a new name in the input above first.", 4, "warning")
+        return
     end
     local data = loadConfigsList()
     if not data[sel] then
-	notify("❌ Not Found", "Config '"..sel.."' not found.", 4, "error")
-	return
+        notify("❌ Not Found", "Config '"..sel.."' not found.", 4, "error")
+        return
     end
     if data[newName] then
-	notify("❌ Name Exists", "Config '"..newName.."' already exists. Choose a different name.", 5, "error")
-	return
+        notify("❌ Name Exists", "Config '"..newName.."' already exists. Choose a different name.", 5, "error")
+        return
     end
     data[newName] = data[sel]
     data[sel] = nil
     local ok = saveConfigsList(data)
     if ok then
-	notify("✏️ Renamed", "'"..sel.."' → '"..newName.."'", 4, "success")
-	refreshConfigs()
-	nameInput:Set("")
+        notify("✏️ Renamed", "'"..sel.."' → '"..newName.."'", 4, "success")
+        refreshConfigs()
+        nameInput:Set("")
     else
-	notify("❌ Rename Failed", "Could not write to file.", 4, "error")
+        notify("❌ Rename Failed", "Could not write to file.", 4, "error")
     end
 end})
 
 SysTab:CreateButton({Name = "🔄 Reset to Defaults", Callback = function()
     local ok, err = pcall(applyProfile, {
-	CustomTag="", UserName="", TagColor={128,0,0}, UserColor={255,255,255}, MessageColor={255,255,255},
-	FarmMode="Hybrid", FarmSpeedMul=1, WorkerCount=50, MaxPerformance=false,
-	TrainSpeedValue="Infinity", AntiDetect=false, WalkSpeed=16, JumpPower=50,
-	OverrideStats=false, NoclipMode="Improved", NoclipEnabled=false,
-	AntiAfk=true, PvpOff=true,
+        CustomTag="", UserName="", TagColor={128,0,0}, UserColor={255,255,255}, MessageColor={255,255,255},
+        FarmMode="Hybrid", FarmSpeedMul=1, WorkerCount=50, MaxPerformance=false,
+        TrainSpeedValue="Infinity", AntiDetect=false, WalkSpeed=16, JumpPower=50,
+        OverrideStats=false, NoclipMode="Improved", NoclipEnabled=false,
+        AntiAfk=true, PvpOff=true,
     })
     if ok then
-	notify("🔄 Reset", "All settings reset to defaults.", 3, "info")
+        notify("🔄 Reset", "All settings reset to defaults.", 3, "info")
     else
-	notify("❌ Reset Error", tostring(err):sub(1,60), 5, "error")
+        notify("❌ Reset Error", tostring(err):sub(1,60), 5, "error")
     end
 end})
 
@@ -775,15 +775,15 @@ SysTab:CreateSection("❌ DANGER")
 local dc = false
 SysTab:CreateButton({Name = "❌ Destroy UI (confirm)", Callback = function()
     if dc then
-	notify("❌ Destroying...", "UI will be removed.", 3, "warning")
-	task.delay(0.3, function()
-	    local ok, err = pcall(function() Lib:Destroy() end)
-	    if not ok then warn("[DOMINUS] Destroy error:", err) end
-	end)
+        notify("❌ Destroying...", "UI will be removed.", 3, "warning")
+        task.delay(0.3, function()
+            local ok, err = pcall(function() Lib:Destroy() end)
+            if not ok then warn("[DOMINUS] Destroy error:", err) end
+        end)
     else
-	dc = true
-	notify("⚠️ Confirm", "Click again within 5s to destroy UI", 5, "warning")
-	task.delay(5, function() dc = false end)
+        dc = true
+        notify("⚠️ Confirm", "Click again within 5s to destroy UI", 5, "warning")
+        task.delay(5, function() dc = false end)
     end
 end})
 
@@ -799,16 +799,16 @@ UserInputService.InputBegan:Connect(function(inp, gp)
     if gp then return end
     local k = inp.KeyCode
     if k == Enum.KeyCode.F and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-	Config.FarmEnabled = not Config.FarmEnabled
-	task.spawn(function() if Config.FarmEnabled then startFarm() else stopFarm() end end)
-	farmToggle:Set(Config.FarmEnabled)
-	notify("⌨️ Shortcut", "Farm: " .. (Config.FarmEnabled and "ON" or "OFF"), 2, "info")
+        Config.FarmEnabled = not Config.FarmEnabled
+        task.spawn(function() if Config.FarmEnabled then startFarm() else stopFarm() end end)
+        farmToggle:Set(Config.FarmEnabled)
+        notify("⌨️ Shortcut", "Farm: " .. (Config.FarmEnabled and "ON" or "OFF"), 2, "info")
     elseif k == Enum.KeyCode.N and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-	Config.NoclipEnabled = not Config.NoclipEnabled
-	task.spawn(function() setNoclipMode(Config.NoclipEnabled) end)
-	notify("⌨️ Shortcut", "Noclip: " .. (Config.NoclipEnabled and "ON" or "OFF"), 2, "info")
+        Config.NoclipEnabled = not Config.NoclipEnabled
+        task.spawn(function() setNoclipMode(Config.NoclipEnabled) end)
+        notify("⌨️ Shortcut", "Noclip: " .. (Config.NoclipEnabled and "ON" or "OFF"), 2, "info")
     elseif k == Enum.KeyCode.T and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
-	task.spawn(setTurbo)
+        task.spawn(setTurbo)
     end
 end)
 

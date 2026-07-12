@@ -47,11 +47,11 @@ local playerGui = player and player:WaitForChild("PlayerGui")
 local T10    = TweenInfo.new(0.10, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
 local T15    = TweenInfo.new(0.15, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
 local T20    = TweenInfo.new(0.20, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T50    = TweenInfo.new(0.50, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
-local TMIN   = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TTAB   = TweenInfo.new(0.34, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
+local T50    = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local TMIN   = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+local TTAB   = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 local TPRESS = TweenInfo.new(0.09, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local TPOP   = TweenInfo.new(0.24, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
+local TPOP   = TweenInfo.new(0.20, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
 -- ============================================================
 -- SHARED CORNER RADII
@@ -374,7 +374,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "1.0.0"
+Library.Version = "2.0.0"
 Library._windows = {}
 
 -- ============================================================
@@ -424,31 +424,60 @@ function Library:CreateWindow(cfg)
                 return fn
         end
 
-        -- ------------------------------------------------------------
-        -- SHARED DRAG ROUTER — one global InputChanged/InputEnded pair
-        -- dispatching to whichever control is mid-drag.
-        -- ------------------------------------------------------------
-        local DragHandlers = {}
-        local function registerDrag(key, moveFn, onEndFn)
-                DragHandlers[key] = { move = moveFn, onEnd = onEndFn }
-        end
-        WindowJanitor:Add(UserInputService.InputChanged:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseMovement
-                        or inp.UserInputType == Enum.UserInputType.Touch then
-                        for _, h in pairs(DragHandlers) do
-                                if h.move then h.move(inp.Position) end
-                        end
-                end
-        end))
-        WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1
-                        or inp.UserInputType == Enum.UserInputType.Touch then
-                        for _, h in pairs(DragHandlers) do
-                                if h.onEnd then pcall(h.onEnd) end
-                        end
-                        table.clear(DragHandlers)
-                end
-        end))
+	-- ------------------------------------------------------------
+	-- FRAME-SYNCHRONIZED POINTER ROUTER
+	-- Exactly one gesture owns the pointer at a time. Input events only
+	-- update the target; visual work happens once per rendered frame.
+	-- This avoids creating a tween/event storm while preserving smooth,
+	-- frame-rate-independent mouse and touch tracking.
+	-- ------------------------------------------------------------
+	local activeDrag = nil
+	local DRAG_RESPONSE = tonumber(cfg.DragResponsiveness) or 32
+	local function finishDrag(cancelled)
+		local drag = activeDrag
+		activeDrag = nil
+		if drag and drag.onEnd then
+			pcall(drag.onEnd, cancelled == true)
+		end
+	end
+	local function registerDrag(key, moveFn, onEndFn, inputObject)
+		finishDrag(true)
+		activeDrag = {
+			key = key,
+			move = moveFn,
+			onEnd = onEndFn,
+			input = inputObject,
+			target = inputObject and inputObject.Position or UserInputService:GetMouseLocation(),
+			current = inputObject and inputObject.Position or UserInputService:GetMouseLocation(),
+		}
+	end
+	WindowJanitor:Add(UserInputService.InputChanged:Connect(function(inp)
+		local drag = activeDrag
+		if not drag then return end
+		if inp.UserInputType == Enum.UserInputType.MouseMovement then
+			drag.target = inp.Position
+		elseif inp.UserInputType == Enum.UserInputType.Touch and (not drag.input or drag.input == inp) then
+			drag.target = inp.Position
+		end
+	end))
+	WindowJanitor:Add(RunService.RenderStepped:Connect(function(dt)
+		local drag = activeDrag
+		if not drag or not drag.move then return end
+		local alpha = 1 - math.exp(-DRAG_RESPONSE * math.min(dt, 0.1))
+		drag.current = drag.current:Lerp(drag.target, alpha)
+		local ok = pcall(drag.move, drag.current, drag.target)
+		if not ok then finishDrag(true) end
+	end))
+	WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
+		local drag = activeDrag
+		if not drag then return end
+		local mouseEnded = inp.UserInputType == Enum.UserInputType.MouseButton1
+		local touchEnded = inp.UserInputType == Enum.UserInputType.Touch and (not drag.input or drag.input == inp)
+		if mouseEnded or touchEnded then finishDrag(false) end
+	end))
+	WindowJanitor:Add(UserInputService.WindowFocusReleased:Connect(function()
+		finishDrag(true)
+	end))
 
         local function ripple(parent, posX, posY, col)
                 local rp = Instance.new("Frame")
@@ -493,15 +522,16 @@ function Library:CreateWindow(cfg)
         local uiScale = Instance.new("UIScale")
         uiScale.Scale = 1
         uiScale.Parent = screenGui
-        local function updateScale()
-                local vp = getViewport()
-                -- Mobile-friendly: leave room for top status bar + bottom controls
-                local scaleX = (vp.X - 16) / WIN_W
-                local scaleY = (vp.Y - 120) / WIN_H
-                -- Allow shrinking down to 0.35 on small phones (was 0.5 — too big)
-                local scale = math.clamp(math.min(scaleX, scaleY), 0.5, 1.0)  -- [FIX] floor 0.5 (was 0.4)
-                uiScale.Scale = scale
-        end
+	local function updateScale()
+		local vp = getViewport()
+		-- Keep controls readable while fitting the whole window on phones.
+		local scaleX = (vp.X - 20) / WIN_W
+		local scaleY = (vp.Y - 72) / WIN_H
+		uiScale.Scale = math.clamp(math.min(scaleX, scaleY), 0.55, 1)
+	end
+	local function toGuiPixels(screenPixels)
+		return screenPixels / math.max(uiScale.Scale, 0.01)
+	end
         updateScale()
         WindowJanitor:Add(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(updateScale))
         -- Defensive re-apply — camera viewport may not be fully settled yet on
@@ -677,7 +707,7 @@ function Library:CreateWindow(cfg)
 
         local logo = Instance.new("TextLabel")
         logo.Text = windowName
-        logo.Size = UDim2.new(0, 220, 0, 26)
+	logo.Size = UDim2.new(1, WIN_W >= 420 and -230 or -112, 0, 26)
         logo.Position = UDim2.new(0, 14, 0, 7)
         logo.BackgroundTransparency = 1
         logo.Font = Enum.Font.GothamBlack
@@ -690,7 +720,7 @@ function Library:CreateWindow(cfg)
 
         local subLbl = Instance.new("TextLabel")
         subLbl.Text = subtitle
-        subLbl.Size = UDim2.new(0, 240, 0, 13)
+	subLbl.Size = UDim2.new(1, WIN_W >= 420 and -220 or -112, 0, 13)
         subLbl.Position = UDim2.new(0, 15, 0, 37)
         subLbl.BackgroundTransparency = 1
         subLbl.Font = Enum.Font.GothamMedium
@@ -711,9 +741,10 @@ function Library:CreateWindow(cfg)
         statFrame.Position = UDim2.new(1, -206, 0.5, -13)
         statFrame.BackgroundColor3 = C.panelAlt
         statFrame.BorderSizePixel = 0
-        statFrame.ZIndex = 5
-        statFrame.Parent = header
-        corner(statFrame, R.small)
+	statFrame.ZIndex = 5
+	statFrame.Visible = WIN_W >= 420
+	statFrame.Parent = header
+	corner(statFrame, R.small)
         local statStroke = stroke(statFrame, C.border, 1)
 
         local fpsLabel = Instance.new("TextLabel")
@@ -884,9 +915,9 @@ function Library:CreateWindow(cfg)
         floatIcon.Size = UDim2.new(0, 52, 0, 52)
         floatIcon.Position = UDim2.new(0, 10, 0, 10)
         floatIcon.BackgroundColor3 = C.accent
-        floatIcon.Text = "👑"
-        floatIcon.Font = Enum.Font.GothamBold
-        floatIcon.TextSize = 20
+	floatIcon.Text = "R"
+	floatIcon.Font = Enum.Font.GothamBlack
+	floatIcon.TextSize = 18
         floatIcon.TextColor3 = C.white
         floatIcon.AutoButtonColor = false
         floatIcon.BorderSizePixel = 0
@@ -903,13 +934,14 @@ function Library:CreateWindow(cfg)
                         local startAbs = floatIcon.AbsolutePosition  -- [FIX] screen pixels
                         floatDragMoved = false
                         local vp = getViewport()
-                        registerDrag("floatIcon", function(pos)
-                                local d = pos - startDrag
-                                if d.Magnitude > 6 then floatDragMoved = true end  -- threshold
-                                local nx = math.clamp(startAbs.X + d.X, 0, vp.X - 44)
-                                local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 44)
-                                floatIcon.Position = UDim2.new(0, nx, 0, ny)
-                        end)
+			registerDrag("floatIcon", function(pos)
+				local d = pos - startDrag
+				if d.Magnitude > 6 then floatDragMoved = true end
+				local size = floatIcon.AbsoluteSize
+				local nx = math.clamp(startAbs.X + d.X, 8, vp.X - size.X - 8)
+				local ny = math.clamp(startAbs.Y + d.Y, 8, vp.Y - size.Y - 8)
+				floatIcon.Position = UDim2.fromOffset(toGuiPixels(nx), toGuiPixels(ny))
+			end, nil, inp)
                 end
         end)
         -- floatIcon.Activated is wired up later, after setHidden exists (see the
@@ -946,16 +978,20 @@ function Library:CreateWindow(cfg)
                         -- Position has scale 0.5/0.55, .Offset gives -WIN_W/2 → flinging
                         local startAbs = frame.AbsolutePosition
                         Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-                        local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-                        registerDrag("window", function(pos)
-                                local d = pos - dragStart
-                                local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
-                                local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 30)
-                                frame.Position = UDim2.new(0, nx, 0, ny)
-                                shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
-                        end, function()
-                                Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-                        end)
+			local vp = getViewport()
+			registerDrag("window", function(pos)
+				local d = pos - dragStart
+				local visibleW = frame.AbsoluteSize.X
+				local visibleH = frame.AbsoluteSize.Y
+				local nx = math.clamp(startAbs.X + d.X, 8, math.max(8, vp.X - visibleW - 8))
+				local ny = math.clamp(startAbs.Y + d.Y, 8, math.max(8, vp.Y - visibleH - 8))
+				local gx, gy = toGuiPixels(nx), toGuiPixels(ny)
+				frame.Position = UDim2.fromOffset(gx, gy)
+				shadow.Position = UDim2.fromOffset(gx - 18, gy - 18)
+				ambientGlow.Position = UDim2.fromOffset(gx - 35, gy - 35)
+			end, function()
+				Tween(shadow, T15, { BackgroundTransparency = 0.52 })
+			end, inp)
                 end
         end))
 
@@ -1132,16 +1168,20 @@ function Library:CreateWindow(cfg)
                 local dragStart = inp.Position
                 local startAbs = frame.AbsolutePosition  -- [FIX] screen pixels
                 Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-                local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
-                registerDrag("statusbar", function(pos)
-                        local d = pos - dragStart
-                        local nx = math.clamp(startAbs.X + d.X, -WIN_W + 100, vp.X - 100)
-                        local ny = math.clamp(startAbs.Y + d.Y, 0, vp.Y - 30)
-                        frame.Position = UDim2.new(0, nx, 0, ny)
-                        shadow.Position = UDim2.new(0, nx - 18, 0, ny - 18)
-                end, function()
-                        Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-                end)
+		local vp = getViewport()
+		registerDrag("statusbar", function(pos)
+			local d = pos - dragStart
+			local visibleW = frame.AbsoluteSize.X
+			local visibleH = frame.AbsoluteSize.Y
+			local nx = math.clamp(startAbs.X + d.X, 8, math.max(8, vp.X - visibleW - 8))
+			local ny = math.clamp(startAbs.Y + d.Y, 8, math.max(8, vp.Y - visibleH - 8))
+			local gx, gy = toGuiPixels(nx), toGuiPixels(ny)
+			frame.Position = UDim2.fromOffset(gx, gy)
+			shadow.Position = UDim2.fromOffset(gx - 18, gy - 18)
+			ambientGlow.Position = UDim2.fromOffset(gx - 35, gy - 35)
+		end, function()
+			Tween(shadow, T15, { BackgroundTransparency = 0.52 })
+		end, inp)
                 end
         end))
 
@@ -1178,23 +1218,29 @@ function Library:CreateWindow(cfg)
                 local dragStart = inp.Position
                 local startW, startH = WIN_W, WIN_H
                 Tween(shadow, T15, { BackgroundTransparency = 0.65 })
-                registerDrag("resize", function(pos)
-                        local d = pos - dragStart
-                        local newW = math.clamp(startW + d.X, MIN_W, MAX_W)
-                        local newH = math.clamp(startH + d.Y, MIN_H, MAX_H)
-                        WIN_W = newW
-                        WIN_H = newH
-                        frame.Position = UDim2.new(0, topLeft.X, 0, topLeft.Y)
-                        frame.Size = UDim2.new(0, newW, 0, newH)
-                        shadow.Position = UDim2.new(0, topLeft.X - 18, 0, topLeft.Y - 18)
-                        shadow.Size = UDim2.new(0, newW + 36, 0, newH + 36)
-                        if not minimized then
-                                body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
-                        end
-                        updateScale()
-                end, function()
-                        Tween(shadow, T15, { BackgroundTransparency = 0.52 })
-                end)
+		registerDrag("resize", function(pos)
+			local d = (pos - dragStart) / math.max(uiScale.Scale, 0.01)
+			local vp = getViewport()
+			local viewportMaxW = math.max(MIN_W, (vp.X - topLeft.X - 8) / math.max(uiScale.Scale, 0.01))
+			local viewportMaxH = math.max(MIN_H, (vp.Y - topLeft.Y - 8) / math.max(uiScale.Scale, 0.01))
+			local newW = math.clamp(startW + d.X, MIN_W, math.min(MAX_W, viewportMaxW))
+			local newH = math.clamp(startH + d.Y, MIN_H, math.min(MAX_H, viewportMaxH))
+			WIN_W, WIN_H = newW, newH
+			statFrame.Visible = newW >= 420
+			logo.Size = UDim2.new(1, newW >= 420 and -230 or -112, 0, 26)
+			subLbl.Size = UDim2.new(1, newW >= 420 and -220 or -112, 0, 13)
+			local gx, gy = toGuiPixels(topLeft.X), toGuiPixels(topLeft.Y)
+			frame.Position = UDim2.fromOffset(gx, gy)
+			frame.Size = UDim2.fromOffset(newW, newH)
+			shadow.Position = UDim2.fromOffset(gx - 18, gy - 18)
+			shadow.Size = UDim2.fromOffset(newW + 36, newH + 36)
+			ambientGlow.Position = UDim2.fromOffset(gx - 35, gy - 35)
+			ambientGlow.Size = UDim2.fromOffset(newW + 70, newH + 70)
+			if not minimized then body.Size = UDim2.new(1, 0, 0, newH - HEADER_H) end
+		end, function()
+			updateScale()
+			Tween(shadow, T15, { BackgroundTransparency = 0.52 })
+		end, inp)
                 end
         end))
         onTheme(function()
@@ -1206,12 +1252,16 @@ function Library:CreateWindow(cfg)
         -- POPUP MANAGER
         -- ------------------------------------------------------------
         local currentPopupJanitor = nil
-        local function closeCurrentPopup()
-                if currentPopupJanitor then
-                        currentPopupJanitor:Cleanup()
-                        currentPopupJanitor = nil
-                end
-        end
+	local function closeCurrentPopup()
+		if currentPopupJanitor then
+			currentPopupJanitor:Cleanup()
+			currentPopupJanitor = nil
+		end
+	end
+	WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, processed)
+		if processed or UserInputService:GetFocusedTextBox() then return end
+		if inp.KeyCode == Enum.KeyCode.Escape then closeCurrentPopup() end
+	end))
 
         -- ------------------------------------------------------------
         -- NOTIFICATIONS
@@ -1315,7 +1365,7 @@ function Library:CreateWindow(cfg)
                 prog.Parent = n
 
                 Tween(n, T20, { BackgroundTransparency = 0.05 })
-                Tween(n, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		Tween(n, TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
                         Size = UDim2.new(1, 0, 0, 68),
                         Position = UDim2.new(0, 0, 0, 0),
                 })
@@ -2040,8 +2090,8 @@ function Library:CreateWindow(cfg)
                                 })
                                 if callback and not silent then pcall(callback, state) end
                         end
-                        function obj:Set(v) apply(v) end
-                        function obj:SetLabel(newText) lbl.Text = newText end
+			function obj:Set(v) apply(v == true) end
+			function obj:SetLabel(newText) lbl.Text = tostring(newText or "") end
                         function obj:Get() return state end
 
                         hit.Activated:Connect(function()
@@ -2064,13 +2114,15 @@ function Library:CreateWindow(cfg)
                 function tab:CreateSlider(scfg)
                         scfg = scfg or {}
                         local nameText  = scfg.Name or "Slider"
-                        local range     = scfg.Range or { 0, 100 }
-                        local minVal    = range[1]
-                        local maxVal    = range[2]
-                        local increment = scfg.Increment or 1
-                        local suffix    = scfg.Suffix or ""
-                        local callback  = scfg.Callback
-                        local value     = math.clamp(scfg.CurrentValue or minVal, minVal, maxVal)
+			local range = type(scfg.Range) == "table" and scfg.Range or { 0, 100 }
+			local minVal = tonumber(range[1]) or 0
+			local maxVal = tonumber(range[2]) or 100
+			if minVal > maxVal then minVal, maxVal = maxVal, minVal end
+			local increment = math.abs(tonumber(scfg.Increment) or 1)
+			if increment <= 0 then increment = 1 end
+			local suffix = tostring(scfg.Suffix or "")
+			local callback = scfg.Callback
+			local value = math.clamp(tonumber(scfg.CurrentValue) or minVal, minVal, maxVal)
 
                         local holder, hStroke = makeHolder(52)
                         local lbl = Instance.new("TextLabel")
@@ -2133,8 +2185,9 @@ function Library:CreateWindow(cfg)
                                 end
                                 return math.clamp(v, minVal, maxVal)
                         end
-                        local function update(animated)
-                                local pct = math.clamp((value - minVal) / (maxVal - minVal), 0, 1)
+			local function update(animated)
+				local span = maxVal - minVal
+				local pct = span == 0 and 0 or math.clamp((value - minVal) / span, 0, 1)
                                 if animated then
                                         Tween(fill, T10, { Size = UDim2.new(pct, 0, 1, 0) })
                                         Tween(knob, T10, { Position = UDim2.new(pct, -8, 0.5, -8) })
@@ -2148,8 +2201,10 @@ function Library:CreateWindow(cfg)
 
                         local obj = { CurrentValue = value }
                         local lastFired = value
-                        function obj:Set(v)
-                                value = snap(v)
+			function obj:Set(v)
+				v = tonumber(v)
+				if not v then return end
+				value = snap(v)
                                 obj.CurrentValue = value
                                 update(true)
                                 lastFired = value
@@ -2201,12 +2256,12 @@ function Library:CreateWindow(cfg)
                                                 registerDrag(hit, function(pos)
                                                         setFromX(pos.X)
                                                         fireCallback()
-                                                end, function()
-                                                        Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
-                                                        fireCallback()
-                                                end)
-                                        end
-                                end)
+						end, function()
+							Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
+							fireCallback()
+						end, inp)
+					end
+				end)
                         onTheme(function()
                                 Tween(holder, T20, { BackgroundColor3 = C.panel })
                                 Tween(hStroke, T20, { Color = C.border })
@@ -2272,10 +2327,11 @@ function Library:CreateWindow(cfg)
                                         box.Text = ""
                                 end
                         end)
-                        function obj:Set(text)
-                                box.Text = text
-                                obj.CurrentValue = text
-                        end
+			function obj:Set(text)
+				local nextText = tostring(text or "")
+				box.Text = nextText
+				obj.CurrentValue = nextText
+			end
                         function obj:Get() return box.Text end
                         onTheme(function()
                                 Tween(holder, T20, { BackgroundColor3 = C.panel })
@@ -2791,15 +2847,15 @@ function Library:CreateWindow(cfg)
                                 catcher.Parent = screenGui
                                 Tween(catcher, T15, { BackgroundTransparency = 0.5 })
 
-                                local sp = swatch.AbsolutePosition
-                                local cam = workspace.CurrentCamera
-                                local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
-                                local px = math.clamp(sp.X - 160, 10, vp.X - 280)
-                                local py = math.clamp(sp.Y - 270, 10, vp.Y - 290)
+				local sp = swatch.AbsolutePosition
+				local vp = getViewport()
+				local renderedW, renderedH = 270 * uiScale.Scale, 280 * uiScale.Scale
+				local px = math.clamp(sp.X - renderedW + swatch.AbsoluteSize.X, 8, math.max(8, vp.X - renderedW - 8))
+				local py = math.clamp(sp.Y - renderedH - 8, 8, math.max(8, vp.Y - renderedH - 8))
 
-                                local panel = Instance.new("Frame")
-                                panel.Size = UDim2.new(0, 270, 0, 280)
-                                panel.Position = UDim2.new(0, px, 0, py)
+				local panel = Instance.new("Frame")
+				panel.Size = UDim2.fromOffset(270, 280)
+				panel.Position = UDim2.fromOffset(toGuiPixels(px), toGuiPixels(py))
                                 panel.BackgroundColor3 = C.panel
                                 panel.BorderSizePixel = 0
                                 panel.Active = true
@@ -2961,9 +3017,9 @@ function Library:CreateWindow(cfg)
                                                         local py2 = math.clamp((pos.Y - pad.AbsolutePosition.Y) / pad.AbsoluteSize.Y, 0, 1)
                                                         s = px2
                                                         v = 1 - py2
-                                                        update()
-                                                end)
-                                                -- Set initial position
+								update()
+							end, nil, inp)
+							-- Set initial position
                                                 s = math.clamp((inp.Position.X - pad.AbsolutePosition.X) / pad.AbsoluteSize.X, 0, 1)
                                                 v = 1 - math.clamp((inp.Position.Y - pad.AbsolutePosition.Y) / pad.AbsoluteSize.Y, 0, 1)
                                                 update()
@@ -2973,10 +3029,10 @@ function Library:CreateWindow(cfg)
                                 -- Hue slider drag — uses InputBegan for mouse+touch
                                 hueSlider.InputBegan:Connect(function(inp)
                                         if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
-                                                registerDrag(hueSlider, function(pos)
-                                                        h = math.clamp((pos.X - hueSlider.AbsolutePosition.X) / hueSlider.AbsoluteSize.X, 0, 1)
-                                                        update()
-                                                end)
+							registerDrag(hueSlider, function(pos)
+								h = math.clamp((pos.X - hueSlider.AbsolutePosition.X) / math.max(hueSlider.AbsoluteSize.X, 1), 0, 1)
+								update()
+							end, nil, inp)
                                                 h = math.clamp((inp.Position.X - hueSlider.AbsolutePosition.X) / hueSlider.AbsoluteSize.X, 0, 1)
                                                 update()
                                         end
@@ -2998,11 +3054,12 @@ function Library:CreateWindow(cfg)
 
                         swatch.MouseButton1Click:Connect(openPicker)
 
-                        function obj:Set(color)
-                                obj.Color = color
-                                swatch.BackgroundColor3 = color
-                                if callback then pcall(callback, color) end
-                        end
+			function obj:Set(color)
+				if typeof(color) ~= "Color3" then return end
+				obj.Color = color
+				swatch.BackgroundColor3 = color
+				if callback then pcall(callback, color) end
+			end
                         function obj:Get() return obj.Color end
 
                         onTheme(function()
@@ -3218,11 +3275,18 @@ function Library:CreateWindow(cfg)
         -- ------------------------------------------------------------
         -- Destroy
         -- ------------------------------------------------------------
-        function Window:Destroy()
-                closeCurrentPopup()
-                table.clear(DragHandlers)  -- clear stale drag handlers
-                WindowJanitor:Cleanup()
-        end
+	function Window:Destroy()
+		closeCurrentPopup()
+		finishDrag(true)
+		hideTooltip()
+		WindowJanitor:Cleanup()
+		for i = #Library._windows, 1, -1 do
+			if Library._windows[i] == Window then table.remove(Library._windows, i) end
+		end
+		if Library._lastWindow == Window then
+			Library._lastWindow = Library._windows[#Library._windows]
+		end
+	end
 
         table.insert(Library._windows, Window)
         Library._lastWindow = Window
@@ -3246,11 +3310,13 @@ function Library:ModifyTheme(theme)
 end
 
 function Library:Destroy()
-        for _, w in ipairs(Library._windows) do
-                pcall(function() w:Destroy() end)
-        end
-        table.clear(Library._windows)
-        Library._lastWindow = nil
+	for i = #Library._windows, 1, -1 do
+		local w = Library._windows[i]
+		pcall(function() w:Destroy() end)
+	end
+	table.clear(Library._windows)
+	table.clear(Library.Flags)
+	Library._lastWindow = nil
 end
 -- ============================================================
 -- LIBRARY-LEVEL UTILITIES
@@ -3288,19 +3354,23 @@ function Library:SaveConfiguration()
 end
 
 function Library:LoadConfiguration(config)
-        if type(config) ~= "table" then warn("[RezurXLib] LoadConfiguration expects table") return end
-        for flag, value in pairs(config) do
-                local obj = self.Flags[flag]
-                if obj and obj.Set then
-                        pcall(function()
-                                if type(value) == "table" and value.R then obj:Set(Color3.new(value.R, value.G, value.B))
-                                elseif type(value) == "string" and value:match("^%u[%u%d]+$") then
-                                        local ok, kc = pcall(function() return Enum.KeyCode[value] end)
-                                        if ok and kc then obj:Set(kc) end
-                                else obj:Set(value) end
-                        end)
-                end
-        end
+	if type(config) ~= "table" then warn("[RezurXLib] LoadConfiguration expects table") return end
+	for flag, value in pairs(config) do
+		local obj = self.Flags[flag]
+		if obj and obj.Set then
+			local ok, err = pcall(function()
+				if type(value) == "table" and tonumber(value.R) and tonumber(value.G) and tonumber(value.B) then
+					obj:Set(Color3.new(math.clamp(value.R, 0, 1), math.clamp(value.G, 0, 1), math.clamp(value.B, 0, 1)))
+				elseif type(value) == "string" and obj.CurrentKeybind ~= nil then
+					local enumOk, keyCode = pcall(function() return Enum.KeyCode[value] end)
+					if enumOk and keyCode then obj:Set(keyCode) end
+				else
+					obj:Set(value)
+				end
+			end)
+			if not ok then warn("[RezurXLib] Failed to load flag " .. tostring(flag) .. ": " .. tostring(err)) end
+		end
+	end
 end
 
 function Library:HasFlag(flag) return self.Flags[flag] ~= nil end

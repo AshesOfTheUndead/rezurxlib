@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Proper Luau syntax balance checker — strips strings & comments correctly."""
 import re
-import sys
+from pathlib import Path
 
 def check(path):
     with open(path) as f:
@@ -43,7 +43,8 @@ def check(path):
     print(f"brackets: {obrackets} vs {cbrackets} -> {'OK' if obrackets == cbrackets else 'MISMATCH'}")
     return ends == expected_ends and opens == closes and obraces == cbraces and obrackets == cbrackets
 
-ok1 = check("/home/z/my-project/RezurXLib.lua")
-ok2 = check("/home/z/my-project/DOMINUS_V8.luau")
+root = Path(__file__).resolve().parent.parent
+ok1 = check(root / "RezurXLib.lua")
+ok2 = check(root / "DOMINUS_V8.luau")
 print()
 print("RESULT:", "ALL OK" if (ok1 and ok2) else "SYNTAX ERROR DETECTED")

@@ -20,15 +20,15 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/AshesOfTheUndead/rayf
 
 ## 🎨 RezurXLib Features
 
-- **Janitor** — every connection captured, zero leaks on teardown
-- **Shared drag router** — ONE InputChanged/InputEnded pair for the whole script
-- **Tween manager** — per-instance-per-property cancel
-- **4 themes** — Ember (orange), Ocean (blue), Crimson (red), Slate (green)
-- **Components** — Button, Toggle, Slider, Dropdown, ColorPicker, Input, Keybind, Paragraph, Label, Divider, Section
-- **Window chrome** — drag (clamped), minimize (animated), close (fade contract), loading overlay
-- **Notifications** — slide-in, progress bar, type icons
-- **FPS + Ping** display
-- **Idempotent re-run** — destroys prior instance first
+- **Frame-synchronized gestures** — one pointer owner with exponential smoothing, touch capture, cancellation, and no per-move tween spam
+- **Scale-correct positioning** — drag, resize, restore control, dropdowns, and color picker stay anchored and viewport-clamped on desktop and mobile
+- **Lifecycle safety** — window teardown cancels active gestures, closes overlays, clears flags, and removes stale window references
+- **Conflict-free tween manager** — newer property animations cancel superseded work cleanly
+- **7 themes** — Ember, Ocean, Crimson, Slate, Midnight, Forest, and Coral
+- **Full component suite** — Button, MultiButton, Toggle, Slider, Dropdown, ColorPicker, Input, Keybind, Bindable, Paragraph, Label, Divider, Section, Image, Spacer, and Accordion
+- **Hardened state** — zero-range sliders, invalid values, keybind configuration round-trips, empty selections, and focused text input are handled safely
+- **Responsive chrome** — compact header behavior, readable phone scaling, draggable restore control, minimize, resize, loading, and notifications
+- **Drop-in compatibility** — existing Rayfield-shaped constructors, flags, callbacks, short aliases, and configuration APIs remain supported
 
 ## ⚡ DOMINUS V7 Engine
 

@@ -43,15 +43,21 @@ local playerGui = player and player:WaitForChild("PlayerGui")
 
 -- ============================================================
 -- TWEEN PRESETS
+-- Exponential easing for smooth Rayfield-style animations
 -- ============================================================
-local T10    = TweenInfo.new(0.10, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T15    = TweenInfo.new(0.15, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T20    = TweenInfo.new(0.20, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local T50    = TweenInfo.new(0.50, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
-local TMIN   = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local TTAB   = TweenInfo.new(0.34, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
-local TPRESS = TweenInfo.new(0.09, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out)
-local TPOP   = TweenInfo.new(0.24, Enum.EasingStyle.Back,  Enum.EasingDirection.Out)
+local T10    = TweenInfo.new(0.10, Enum.EasingStyle.Quad,        Enum.EasingDirection.Out)
+local T15    = TweenInfo.new(0.15, Enum.EasingStyle.Quad,        Enum.EasingDirection.Out)
+local T20    = TweenInfo.new(0.20, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local T30    = TweenInfo.new(0.30, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local T40    = TweenInfo.new(0.40, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local T50    = TweenInfo.new(0.50, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
+local T60    = TweenInfo.new(0.60, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TMIN   = TweenInfo.new(0.32, Enum.EasingStyle.Quint,       Enum.EasingDirection.Out)
+local TTAB   = TweenInfo.new(0.34, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
+local TPRESS = TweenInfo.new(0.09, Enum.EasingStyle.Quad,        Enum.EasingDirection.Out)
+local TPOP   = TweenInfo.new(0.24, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
+local TTOGGLE = TweenInfo.new(0.45, Enum.EasingStyle.Quart,      Enum.EasingDirection.Out)
+local TTOGGLEBG = TweenInfo.new(0.80, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
 
 -- ============================================================
 -- SHARED CORNER RADII
@@ -1899,22 +1905,37 @@ function Library:CreateWindow(cfg)
                         arr.Parent = b
 
                         b.MouseEnter:Connect(function()
-                                Tween(b, T10, { BackgroundColor3 = C.panelHov })
-                                Tween(arr, T10, { TextColor3 = C.accent, Position = UDim2.new(1, -18, 0, 0) })
+                                Tween(b, T20, { BackgroundColor3 = C.panelHov })
+                                Tween(arr, T20, { TextColor3 = C.accent, Position = UDim2.new(1, -18, 0, 0) })
                         end)
                         b.MouseLeave:Connect(function()
-                                Tween(b, T10, { BackgroundColor3 = C.panel })
-                                Tween(arr, T10, { TextColor3 = C.muted, Position = UDim2.new(1, -22, 0, 0) })
+                                Tween(b, T20, { BackgroundColor3 = C.panel })
+                                Tween(arr, T20, { TextColor3 = C.muted, Position = UDim2.new(1, -22, 0, 0) })
                         end)
                         b.MouseButton1Click:Connect(function()
                                 ripple(b, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
-                                Tween(b, T10, { BackgroundColor3 = C.accentDim })
-                                Tween(lbl, T10, { TextColor3 = C.white })
-                                task.delay(0.13, function()
-                                        Tween(b, T10, { BackgroundColor3 = C.panelHov })
-                                        Tween(lbl, T10, { TextColor3 = C.text })
+                                Tween(b, T20, { BackgroundColor3 = C.accentDim })
+                                Tween(lbl, T20, { TextColor3 = C.white })
+                                task.delay(0.15, function()
+                                        Tween(b, T20, { BackgroundColor3 = C.panelHov })
+                                        Tween(lbl, T20, { TextColor3 = C.text })
                                 end)
-                                if callback then task.spawn(function() pcall(callback) end) end
+                                if callback then
+                                    task.spawn(function()
+                                        local ok, err = pcall(callback)
+                                        if not ok then
+                                                -- Rayfield-style: red flash on callback error
+                                                Tween(b, T20, { BackgroundColor3 = Color3.fromRGB(85, 0, 0) })
+                                                local origText = lbl.Text
+                                                lbl.Text = "Callback Error"
+                                                warn("[RezurXLib] Button '"..nameText.."' callback error: "..tostring(err))
+                                                task.delay(0.5, function()
+                                                        lbl.Text = origText
+                                                        Tween(b, T20, { BackgroundColor3 = C.panel })
+                                                end)
+                                        end
+                                    end)
+                                end
                         end)
                         onTheme(function()
                                 Tween(b, T20, { BackgroundColor3 = C.panel })
@@ -2033,12 +2054,33 @@ function Library:CreateWindow(cfg)
                         local function apply(v, silent)
                                 state = v
                                 obj.CurrentValue = v
-                                Tween(sw, T20, { BackgroundColor3 = state and C.accent or C.track })
+                                -- Rayfield-style: knob shrinks briefly then grows back (pop effect)
+                                Tween(knob, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+                                        { Size = UDim2.new(0, 14, 0, 14) })
+                                task.delay(0.15, function()
+                                        Tween(knob, TTOGGLE, { Size = UDim2.new(0, 18, 0, 18) })
+                                end)
+                                -- Switch background fades smoothly
+                                Tween(sw, TTOGGLEBG, { BackgroundColor3 = state and C.accent or C.track })
                                 Tween(hStroke, T20, { Color = state and C.accentDim or C.border })
-                                Tween(knob, T50, {
+                                -- Knob slides with smooth easing
+                                Tween(knob, TTOGGLE, {
                                         Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
                                 })
-                                if callback and not silent then pcall(callback, state) end
+                                if callback and not silent then
+                                        local ok, err = pcall(callback, state)
+                                        if not ok then
+                                                -- Rayfield-style: red flash on callback error
+                                                Tween(holder, T20, { BackgroundColor3 = Color3.fromRGB(85, 0, 0) })
+                                                local origText = lbl.Text
+                                                lbl.Text = "Callback Error"
+                                                task.delay(0.5, function()
+                                                        lbl.Text = origText
+                                                        Tween(holder, T20, { BackgroundColor3 = C.panel })
+                                                end)
+                                                warn("[RezurXLib] Toggle '"..nameText.."' callback error: "..tostring(err))
+                                        end
+                                end
                         end
                         function obj:Set(v) apply(v) end
                         function obj:SetLabel(newText) lbl.Text = newText end
@@ -2115,13 +2157,23 @@ function Library:CreateWindow(cfg)
                         })
 
                         local knob = Instance.new("Frame")
-                        knob.Size = UDim2.new(0, 16, 0, 16)
-                        knob.Position = UDim2.new(0, -8, 0.5, -8)
+                        knob.Size = UDim2.new(0, 18, 0, 18)
+                        knob.Position = UDim2.new(0, -9, 0.5, -9)
                         knob.BackgroundColor3 = C.white
                         knob.BorderSizePixel = 0
                         knob.Parent = track
                         corner(knob, UDim.new(1, 0))
-                        local knobStroke = stroke(knob, C.accent, 1.5)
+                        local knobStroke = stroke(knob, C.accent, 2)
+                        -- Shadow under knob for depth (Rayfield-style)
+                        local knobShadow = Instance.new("ImageLabel")
+                        knobShadow.Size = UDim2.new(1, 8, 1, 8)
+                        knobShadow.Position = UDim2.new(0, -4, 0, -4)
+                        knobShadow.BackgroundTransparency = 1
+                        knobShadow.Image = "rbxassetid://1316045217"
+                        knobShadow.ImageColor3 = Color3.new(0, 0, 0)
+                        knobShadow.ImageTransparency = 0.7
+                        knobShadow.ZIndex = knob.ZIndex - 1
+                        knobShadow.Parent = knob
 
                         local function snap(v)
                                 v = math.clamp(v, minVal, maxVal)
@@ -2137,10 +2189,10 @@ function Library:CreateWindow(cfg)
                                 local pct = math.clamp((value - minVal) / (maxVal - minVal), 0, 1)
                                 if animated then
                                         Tween(fill, T10, { Size = UDim2.new(pct, 0, 1, 0) })
-                                        Tween(knob, T10, { Position = UDim2.new(pct, -8, 0.5, -8) })
+                                        Tween(knob, T10, { Position = UDim2.new(pct, -9, 0.5, -9) })
                                 else
                                         fill.Size = UDim2.new(pct, 0, 1, 0)
-                                        knob.Position = UDim2.new(pct, -8, 0.5, -8)
+                                        knob.Position = UDim2.new(pct, -9, 0.5, -9)
                                 end
                                 valLbl.Text = tostring(value) .. suffix
                         end
@@ -2178,7 +2230,10 @@ function Library:CreateWindow(cfg)
                                         -- actually calls back when the snapped value changed.
                                         if callback and value ~= lastFired then
                                                 lastFired = value
-                                                pcall(callback, value)
+                                                local ok, err = pcall(callback, value)
+                                                if not ok then
+                                                        warn("[RezurXLib] Slider '"..nameText.."' callback error: "..tostring(err))
+                                                end
                                         end
                                 end
                                 -- [FIX] Transparent overlay covering the whole holder. Tapping the
@@ -2195,14 +2250,16 @@ function Library:CreateWindow(cfg)
                                 hit.InputBegan:Connect(function(inp)
                                         if inp.UserInputType == Enum.UserInputType.MouseButton1
                                                 or inp.UserInputType == Enum.UserInputType.Touch then
-                                                Tween(knob, T10, { Size = UDim2.new(0, 20, 0, 20) })
+                                                -- Knob grows on grab (Rayfield-style)
+                                                Tween(knob, T20, { Size = UDim2.new(0, 22, 0, 22) })
                                                 setFromX(inp.Position.X)
                                                 fireCallback()
                                                 registerDrag(hit, function(pos)
                                                         setFromX(pos.X)
                                                         fireCallback()
                                                 end, function()
-                                                        Tween(knob, T10, { Size = UDim2.new(0, 16, 0, 16) })
+                                                        -- Knob shrinks back on release
+                                                        Tween(knob, T20, { Size = UDim2.new(0, 18, 0, 18) })
                                                         fireCallback()
                                                 end)
                                         end

@@ -300,6 +300,13 @@ function Janitor:Cleanup()
                         pcall(function()
                                 if type(e.obj) == "function" then
                                         e.obj()
+                                elseif typeof(e.obj) == "Instance" then
+                                        -- [FIX] Instances don't have Disconnect — calling e.obj["Disconnect"]
+                                        -- on an Instance throws (Instances error on missing members, unlike
+                                        -- tables which return nil). The pcall swallows the error silently,
+                                        -- so Destroy never runs and the Instance leaks forever. Fall through
+                                        -- to Destroy for any Instance.
+                                        e.obj:Destroy()
                                 elseif e.obj[e.method] then
                                         e.obj[e.method](e.obj)
                                 elseif e.obj.Destroy then
@@ -752,7 +759,7 @@ function Library:CreateWindow(cfg)
                         error("[RezurXLib] Could not attach ScreenGui: " .. tostring(attachError), 2)
                 end
         end
-        WindowJanitor:Add(screenGui)
+        WindowJanitor:Add(screenGui, "Destroy")
 
         -- Popups intentionally live in an unscaled sibling layer. The window
         -- itself scales on small screens; menus, dialogs, and dismiss catchers
@@ -770,7 +777,7 @@ function Library:CreateWindow(cfg)
         overlayGui:SetAttribute("RezurXOverlay", true)
         local overlayAttached = pcall(function() overlayGui.Parent = screenGui.Parent end)
         if overlayAttached and overlayGui.Parent then
-                WindowJanitor:Add(overlayGui)
+                WindowJanitor:Add(overlayGui, "Destroy")
         else
                 -- A popup is still functional in the main layer if a host
                 -- rejects a sibling ScreenGui, albeit without portal scaling.
@@ -935,7 +942,14 @@ function Library:CreateWindow(cfg)
         local hFix = Instance.new("Frame")
         hFix.Size = UDim2.new(1, 0, 0.5, 0)
         hFix.Position = UDim2.new(0, 0, 0.5, 0)
-        hFix.BackgroundColor3 = C.headerB
+        -- [FIX] Blend headerA and headerB for the midpoint color instead of
+        -- using pure headerB — the gradient only reaches headerB at the very
+        -- bottom, so a pure headerB patch created a visible seam.
+        hFix.BackgroundColor3 = Color3.new(
+                (C.headerA.R + C.headerB.R) * 0.5,
+                (C.headerA.G + C.headerB.G) * 0.5,
+                (C.headerA.B + C.headerB.B) * 0.5
+        )
         hFix.BorderSizePixel = 0
         hFix.ZIndex = 4
         hFix.Parent = header
@@ -990,7 +1004,11 @@ function Library:CreateWindow(cfg)
         brandLetter.Parent = brandMark
         onTheme(function()
                 Tween(header, T20, { BackgroundColor3 = C.headerA })
-                Tween(hFix, T20, { BackgroundColor3 = C.headerB })
+                Tween(hFix, T20, { BackgroundColor3 = Color3.new(
+                        (C.headerA.R + C.headerB.R) * 0.5,
+                        (C.headerA.G + C.headerB.G) * 0.5,
+                        (C.headerA.B + C.headerB.B) * 0.5
+                ) })
                 Tween(accentLine, T20, { BackgroundColor3 = C.accent })
                 logoGlow.BackgroundColor3 = C.accent
                 Tween(brandMark, T20, { BackgroundColor3 = C.accentDark })
@@ -1254,17 +1272,21 @@ function Library:CreateWindow(cfg)
         floatIcon.InputBegan:Connect(function(inp)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
                         local startDrag = inp.Position
-                        local startAbs = floatIcon.AbsolutePosition  -- [FIX] screen pixels
                         floatDragMoved = false
                         local vp = getViewport()
                         registerDrag("floatIcon", inp, function(pos)
                                 local d = pos - startDrag
-                                if d.Magnitude > 6 then floatDragMoved = true end  -- threshold
-                                local nx = math.clamp(startAbs.X + d.X, 0, math.max(0, vp.X - floatIcon.AbsoluteSize.X))
-                                local ny = math.clamp(startAbs.Y + d.Y, 0, math.max(0, vp.Y - floatIcon.AbsoluteSize.Y))
+                                if d.Magnitude > 6 then floatDragMoved = true end
+                                -- [FIX] Re-read AbsolutePosition every frame and apply as a nudge
+                                -- (current → target) so any IgnoreGuiInset offset cancels out
+                                -- instead of being baked in at drag-start.
+                                local cur = floatIcon.AbsolutePosition
+                                local targetX = math.clamp(cur.X + d.X, 0, math.max(0, vp.X - floatIcon.AbsoluteSize.X))
+                                local targetY = math.clamp(cur.Y + d.Y, 0, math.max(0, vp.Y - floatIcon.AbsoluteSize.Y))
                                 local scale = overlayGui == screenGui
                                         and math.max(uiScale.Scale, 0.01) or 1
-                                floatIcon.Position = UDim2.new(0, nx / scale, 0, ny / scale)
+                                floatIcon.Position = UDim2.new(0, targetX / scale, 0, targetY / scale)
+                                startDrag = pos  -- update for next delta
                         end)
                 end
         end)
@@ -3364,8 +3386,8 @@ function Library:CreateWindow(cfg)
                                 catcher.Activated:Connect(closeCurrentPopup)
 
                                 local popupJanitor = Janitor.new()
-                                popupJanitor:Add(catcher)
-                                popupJanitor:Add(list)
+                                popupJanitor:Add(catcher, "Destroy")
+                                popupJanitor:Add(list, "Destroy")
                                 popupJanitor:Add(function()
                                         popupOpen = false
                                         arrow.Text = "▾"
@@ -3875,8 +3897,8 @@ function Library:CreateWindow(cfg)
                                 catcher.Activated:Connect(closeCurrentPopup)
 
                                 local pj = Janitor.new()
-                                pj:Add(catcher)
-                                pj:Add(panel)
+                                pj:Add(catcher, "Destroy")
+                                pj:Add(panel, "Destroy")
                                 currentPopupJanitor = pj
                         end
 
@@ -5333,8 +5355,8 @@ function Library:CreateWindow(cfg)
                                 end
                                 catcher.Activated:Connect(closeMenu)
                                 local popupJanitor = Janitor.new()
-                                popupJanitor:Add(catcher)
-                                popupJanitor:Add(popup)
+                                popupJanitor:Add(catcher, "Destroy")
+                                popupJanitor:Add(popup, "Destroy")
                                 currentPopupJanitor = popupJanitor
                                 Tween(popup, T15, { BackgroundColor3 = C.panel })
                                 Tween(popupStroke, T15, { Color = C.borderAcc })
@@ -5646,7 +5668,7 @@ function Library:CreateWindow(cfg)
                 overlay.Parent = overlayGui
                 commandOverlay = overlay
                 commandJanitor = Janitor.new()
-                commandJanitor:Add(overlay)
+                commandJanitor:Add(overlay, "Destroy")
 
                 local palette = Instance.new("Frame")
                 local viewport = getViewport()
@@ -5917,7 +5939,7 @@ function Library:CreateWindow(cfg)
                         if point.X < p.X or point.X > p.X + s.X or point.Y < p.Y or point.Y > p.Y + s.Y then obj:Cancel() end
                 end)
                 modalJanitor = Janitor.new()
-                modalJanitor:Add(overlay)
+                modalJanitor:Add(overlay, "Destroy")
                 Tween(panel, TPOP, { Size = UDim2.new(0, panelWidth, 0, 188) })
                 Tween(panelStroke, T20, { Color = C.borderAcc })
                 Tween(title, T20, { TextColor3 = C.text })

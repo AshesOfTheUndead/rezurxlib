@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "skills": {
+    "roblox": {
+      "version": "1.0.0",
+      "installedAt": 1783263234197
+    },
+    "ui-design": {
+      "version": "1.0.0",
+      "installedAt": 1783263462713
+    },
+    "ui-design-tips": {
+      "version": "1.1.0",
+      "installedAt": 1783263465987
+    },
+    "state-management": {
+      "version": "1.0.0",
+      "installedAt": 1783264247620
+    }
+  }
+}

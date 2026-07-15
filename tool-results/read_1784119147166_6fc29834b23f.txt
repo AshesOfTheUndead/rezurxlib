@@ -1,0 +1,342 @@
+   300→4101:                                if inp.KeyCode == bound and callback then pcall(callback, enabled) end
+   301→4152:                        icon.Font = Enum.Font.GothamBold
+   302→4163:                        title.Font = Enum.Font.GothamBold
+   303→4175:                        content.Font = Enum.Font.Gotham
+   304→4242:                        label.Font = Enum.Font.GothamMedium
+   305→4254:                        value.Font = Enum.Font.Code
+   306→4365:                        name.Font = Enum.Font.GothamMedium
+   307→4377:                        detail.Font = Enum.Font.Gotham
+   308→4389:                        value.Font = Enum.Font.Code
+   309→4447:                -- Code blocks are read-only by design. Copying is delegated
+   310→4460:                        title.Font = Enum.Font.GothamMedium
+   311→4474:                        copyButton.Font = Enum.Font.GothamBold
+   312→4499:                        code.Font = Enum.Font.Code
+   313→4511:                                Title = ccfg.Title or ccfg.Name or "Code",
+   314→4512:                                Code = ccfg.Code or ccfg.Content or "",
+   315→4517:                                code.Text = obj.Code
+   316→4529:                                return obj.Code
+   317→4532:                        function obj:Set(nextCode)
+   318→4533:                                obj.Code = tostring(nextCode or "")
+   319→4535:                                return obj.Code
+   320→4540:                                        pcall(ccfg.CopyCallback, obj.Code, obj)
+   321→4550:                                return obj.Code
+   322→4601:                        title.Font = Enum.Font.GothamMedium
+   323→4630:                                label.Font = Enum.Font.GothamBold
+   324→4663:                        empty.Font = Enum.Font.Gotham
+   325→4715:                                        cell.Font = Enum.Font.Gotham
+   326→4833:                        label.Font = Enum.Font.GothamMedium
+   327→4845:                        counter.Font = Enum.Font.Code
+   328→4871:                        box.Font = Enum.Font.Code
+   329→5023:                        label.Font = Enum.Font.GothamMedium
+   330→5034:                        detail.Font = Enum.Font.Gotham
+   331→5121:                        previous.Font = Enum.Font.GothamBold
+   332→5140:                        title.Font = Enum.Font.GothamBold
+   333→5151:                        bodyText.Font = Enum.Font.Gotham
+   334→5163:                        counter.Font = Enum.Font.Code
+   335→5255:                        label.Font = Enum.Font.GothamMedium
+   336→5267:                        openButton.Font = Enum.Font.GothamBold
+   337→5330:                                        choice.Font = Enum.Font.GothamMedium
+   338→5431:                        return tab:CreateCodeBlock({ Title = title, Code = code, CopyCallback = copyCallback })
+   339→5490:                        local ok, value = pcall(function() return Enum.KeyCode[nextKey] end)
+   340→5493:        if typeof(nextKey) ~= "EnumItem" or nextKey.EnumType ~= Enum.KeyCode then
+   341→5494:                        warn("[RezurXLib] SetToggleKeybind expects an Enum.KeyCode or key name.")
+   342→5695:                prompt.Font = Enum.Font.GothamMedium
+   343→5709:                input.Font = Enum.Font.Gotham
+   344→5752:                                        result.Font = Enum.Font.GothamMedium
+   345→5781:                                none.Font = Enum.Font.Gotham
+   346→5862:                title.Font = Enum.Font.GothamBold
+   347→5874:                content.Font = Enum.Font.Gotham
+   348→5889:                cancel.Font = Enum.Font.GothamBold
+   349→6023:                if inp.KeyCode == Enum.KeyCode.Escape and commandOverlay then
+   350→6028:                local commandPressed = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
+   351→6029:                        or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
+   352→6030:                        or UserInputService:IsKeyDown(Enum.KeyCode.LeftMeta)
+   353→The file has grown significantly to over 6300 lines, and I can see there are already several attempted fixes in place—comments indicate previous work on blending headers, implementing resize handles, and optimizing emoji rendering with specific fonts. Looking at the resize handle's actual positioning values, I'm calculating where it ends up: with Position set to (100% - 22px, 100% - 22px) and Size 22x22, and AnchorPoint defaulting to (0,0), the handle's top-left corner lands at exactly (parentWidth - 22, parentHeight - 22), which means its bottom-right corner aligns perfectly with the parent frame's corner—so mathematically it shouldn't protrude outside at all, yet the screenshot shows it does stick out, suggesting there's a mismatch between what the code says and what's actually rendering.
+   354→The issue likely stems from the parent frame having a UICorner applied (which creates rounded corners) but possibly lacking ClipsDescendants enabled, so the resize handle—which probably also has its own UICorner—sits in the square bounding box and its corners extend beyond the parent's rounded visual boundary, making it appear to stick out even though it's technically within the frame's rectangular bounds. The core issue is that UICorner only rounds the visual appearance of its own instance without clipping children, so a resize handle positioned at the exact corner will still render its full square shape in the area where the parent's rounded corner has made the background transparent, causing it to visually protrude beyond the parent's rounded edge.
+   355→For the bottom-left bleed, it's likely a similar problem where a child element (background frame, glow, accent, or shadow layer) positioned flush in that corner either lacks rounding entirely or has a smaller corner radius than the main frame, so it peeks out from behind the rounded silhouette and creates the black bleed. I need to examine how the main frame itself is structured to understand what's causing this. …Show lessLocating the shared drag handler, the corner/stroke helper functions, ClipsDescendants usage, and the main window frame setupbashFILE=/mnt/user-data/uploads/RezurXlibrary.txt
+   356→echo "=== registerDrag (definition + all call sites) ==="
+   357→grep -n "registerDrag" "$FILE"
+   358→echo ""
+   359→echo "=== corner()/stroke() helper defs ==="
+   360→grep -n "^local function corner\|^local function stroke\|^\s*local function corner\|^\s*local function stroke" "$FILE"
+   361→echo ""
+   362→echo "=== ClipsDescendants ==="
+   363→grep -n "ClipsDescendants" "$FILE"
+   364→echo ""
+   365→echo "=== R\. radius table refs ==="
+   366→grep -n "R\.outer\|R\.small\|R\.medium\|R\s*=\s*{" "$FILE" | head -40
+   367→echo ""
+   368→echo "=== main frame creation ==="
+   369→grep -n "local frame = Instance.new\|frame.Name =\|frame\.Size = UDim2.new(0, WIN_W\|WIN_W, WIN_H" "$FILE" | head -40
+   370→Output=== registerDrag (definition + all call sites) ===
+   371→681:        local function registerDrag(owner, sourceInput, moveFn, onEndFn)
+   372→1284:                        registerDrag("floatIcon", inp, function(pos)
+   373→1359:                        registerDrag("window", inp, function(pos)
+   374→1608:                registerDrag("resize", inp, function(pos)
+   375→2921:                                                registerDrag(hit, inp, function(pos)
+   376→3870:                                                registerDrag(pad, inp, function(pos)
+   377→3887:                                                registerDrag(hueSlider, inp, function(pos)
+   378→
+   379→=== corner()/stroke() helper defs ===
+   380→394:local function corner(p, r)
+   381→400:local function stroke(p, col, thick)
+   382→
+   383→=== ClipsDescendants ===
+   384→868:        frame.ClipsDescendants = true
+   385→884:        body.ClipsDescendants = true
+   386→1480:        statusBar.ClipsDescendants = true
+   387→1688:                n.ClipsDescendants = true
+   388→2516:                        b.ClipsDescendants = true
+   389→3192:                                list.ClipsDescendants = true
+   390→3986:                        container.ClipsDescendants = true
+   391→4266:                        track.ClipsDescendants = true
+   392→4489:                        codeSurface.ClipsDescendants = true
+   393→5307:                                popup.ClipsDescendants = true
+   394→
+   395→=== R\. radius table refs ===
+   396→60:local R = { outer = 20, panel = 12, control = 10, small = 7, pill = 6, tab = 9 }
+   397→557:        corner(tooltipFrame, R.small)
+   398→843:        corner(shadow, R.outer + 8)
+   399→857:        corner(ambientGlow, R.outer + 16)
+   400→871:        corner(frame, R.outer)
+   401→936:        corner(header, R.outer)
+   402→989:        corner(brandMark, R.small)
+   403→1083:        corner(statFrame, R.small)
+   404→1155:        corner(minBtn, R.small)
+   405→1198:        corner(closeBtn, R.small)
+   406→1215:        corner(closeGlow, R.small + 4)
+   407→1482:        corner(statusBar, R.outer)
+   408→1586:        corner(resizeHandle, R.small)
+   409→1711:                corner(iconF, R.small)
+   410→1785:                                corner(button, R.small)
+   411→3219:                                        corner(searchHolder, R.small)
+   412→3253:                                        corner(item, R.small)
+   413→3656:                        corner(swatch, R.small)
+   414→3714:                                corner(preview, R.small)
+   415→3727:                                corner(pad, R.small)
+   416→3824:                                corner(doneBtn, R.small)
+   417→4157:                        corner(icon, R.small)
+   418→4481:                        corner(copyButton, R.small)
+   419→4492:                        corner(codeSurface, R.small)
+   420→4619:                        corner(header, R.small)
+   421→4699:                                corner(row, R.small)
+   422→4859:                        corner(inputSurface, R.small)
+   423→5127:                        corner(previous, R.small)
+   424→5273:                        corner(openButton, R.small)
+   425→5338:                                        corner(choice, R.small)
+   426→5717:                corner(input, R.small)
+   427→5759:                                        corner(result, R.small)
+   428→5856:                corner(panel, R.outer)
+   429→5896:                corner(cancel, R.small)
+   430→
+   431→=== main frame creation ===
+   432→629:        local WIN_W, WIN_H = normalizeSize(cfg.Size, 460, 500, MIN_W, MIN_H, MAX_W, MAX_H)
+   433→862:        local frame = Instance.new("Frame")
+   434→863:        frame.Name = "Window"
+   435→864:        frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
+   436→1601:                local startW, startH = WIN_W, WIN_H
+   437→5564:                local newW, newH = normalizeSize(nextSize, WIN_W, WIN_H, MIN_W, MIN_H, MAX_W, MAX_H)
+   438→5566:                WIN_W, WIN_H = newW, newH
+   439→5583:                return Vector2.new(WIN_W, WIN_H)
+   440→So frame.ClipsDescendants is set to true, which means the frame should be clipping its children like the resize handle and status bar to its rounded corners. But the resize handle is parented directly to the frame, so if clipping is enabled, it should be getting clipped too—though the thought cuts off before confirming whether that's actually what's happening.
+   441→Actually, I'm realizing the key issue: in Roblox, ClipsDescendants clips children to the rectangular bounding box of the frame, not to the rounded shape created by UICorner. The UICorner only affects the visual rendering of the frame's own corners, making them appear rounded, but it doesn't create an actual rounded clipping mask for descendants. So a child element sitting in the corner would be clipped to the frame's rectangular bounds, but it would still occupy the square corner area where the frame's rounded visual doesn't actually render—creating a visual mismatch.
+   442→In this case, the resize handle has its own small corner rounding (radius 7), but it's positioned flush in the corner of a frame with much larger corner rounding (radius 20). Since the frame's rounded corners curve away more aggressively than the handle's own small rounding, the handle's squarish silhouette ends up visually protruding beyond where the frame's larger rounded corner has already curved away—which is exactly what issue #4 describes.
+   443→Now I'm checking the statusBar element to understand issue #2 about the black background sticking out. I can see it has the outer corner rounding applied and ClipsDescendants enabled, but I need to verify whether the header also has ClipsDescendants set.
+   444→Looking at the grep results, only frame, body, statusBar, and a few other container elements have ClipsDescendants enabled—header doesn't. The header has its own corner rounding applied but since it lacks ClipsDescendants, its children could theoretically overflow, though that's less relevant to the bottom-left corner issue since the header is…Show lessReading the shared registerDrag function to check how initial drag offset is calculatedSo registerDrag sets up the drag session, but the actual movement happens through the moveFn callback that fires on each InputChanged event with the current mouse position—it doesn't execute immediately when the drag starts. The positioning logic lives entirely in the function passed to registerDrag, which varies by component (like the slider's tween that animates the knob to a new position based on the percentage).
+   445→Now I need to look at the createSlider function's input handling around lines 2836-2900 to see where the percentage calculation happens—that's where the mouse position gets mapped to the knob's position.Reading the CreateSlider input handling to see how the initial drag position/percent is calculated (checking for the teleport-on-first-drag bug)I found the exact bug causing issue #3. Looking at the input handler around line 2914, when the mouse button or touch input is detected, the code is supposed to grow the knob slightly while it's being grabbed, but the size tween definition appears to be incomplete or malformed.
+   446→The setFromX function itself looks correct—it properly converts the click X-coordinate into a percentage along the track using absolute positions and sizes. But I'm realizing the real issue: when you first click anywhere on the track, setFromX() immediately jumps the knob to that position before any drag even starts. That's the teleport-on-first-drag behavior—it's treating the initial click as an instant value set rather than just starting a drag operation. So when the user clicks anywhere on the slider track, the hit detector fires and immediately calls setFromX with the absolute screen X position, which converts that to a percentage along the track. If they happen to click right on the knob itself, the jump is imperceptible since the knob's already near that position. But I need to check if this is actually the main slider being referenced or if there's a different slider implementation involved—the screenshot only shows the CONFIGS tab, so I'm not certain which slider the user is actually reporting the issue on.
+   447→Looking at the color picker's hue slider implementation, it has its own input handler that clamps the hue value based on the click position relative to the slider's absolute bounds.
+   448→The "teleports to the corner" bug might stem from a timing issue where the slider's layout hasn't fully updated when the first input event fires, causing the AbsolutePosition to be stale or uninitialized, which would throw off the percentage calculation. So this is a classic layout race condition: the very first drag attempt happens before the UI engine has finished computing the final AbsolutePosition values, especially if the slider is on a tab that just became visible or if the whole UI was …Show lessChecking whether the code waits a frame for layout to settle before enabling drag, and viewing the full slider construction to diagnose the first-drag teleport bugbashFILE=/mnt/user-data/uploads/RezurXlibrary.txt
+   449→echo "=== task.wait / Heartbeat / RenderStepped / task.defer ==="
+   450→grep -n "task.wait\|RunService.Heartbeat\|task.defer\|RenderStepped\|WaitForChild(\"PlayerGui" "$FILE" | head -30
+   451→echo ""
+   452→echo "=== AbsoluteSize / AbsolutePosition usage count ==="
+   453→grep -n "AbsoluteSize\|AbsolutePosition" "$FILE" | wc -l
+   454→echo ""
+   455→echo "=== screenGui.Parent assignment (when UI actually mounts) ==="
+   456→grep -n "\.Parent = playerGui\|\.Parent = PlayerGui\|screenGui.Parent\|ScreenGui.Parent\|gui.Parent =" "$FILE" | head -20
+   457→echo ""
+   458→echo "=== slider holder/track construction (pre-knob) ==="
+   459→sed -n '2763,2836p' "$FILE"
+   460→Output=== task.wait / Heartbeat / RenderStepped / task.defer ===
+   461→37:local playerGui = player and player:WaitForChild("PlayerGui")
+   462→462:                        or player:WaitForChild("PlayerGui", 5)
+   463→923:                        task.wait(3.8)
+   464→1035:                        task.wait(1.6)
+   465→1039:                        task.wait(1.6)
+   466→1121:        if showStats then WindowJanitor:Add(RunService.Heartbeat:Connect(function(dt)
+   467→1140:                        task.wait(1)
+   468→1457:                        task.wait(2.4)
+   469→1514:                                task.wait(0.7)
+   470→1518:                                task.wait(0.7)
+   471→1541:                                task.wait(1)
+   472→1996:                                task.wait(0.12)
+   473→1999:                                task.wait(0.5)
+   474→2003:                                task.wait(0.1)
+   475→2005:                                task.wait(0.2)
+   476→2180:                        task.defer(function()
+   477→2208:                        task.defer(function()
+   478→2232:                        task.defer(function()
+   479→2274:                        task.defer(function() setActive(true) end)
+   480→3408:                                        task.defer(function()
+   481→4000:                        task.defer(refreshSize)
+   482→4746:                                task.defer(updateCanvas)
+   483→4755:                                task.defer(updateCanvas)
+   484→4774:                                task.defer(updateCanvas)
+   485→4811:                        task.defer(updateCanvas)
+   486→5804:                task.defer(function()
+   487→
+   488→=== AbsoluteSize / AbsolutePosition usage count ===
+   489→36
+   490→
+   491→=== screenGui.Parent assignment (when UI actually mounts) ===
+   492→746:        local attached, attachError = pcall(function() screenGui.Parent = guiHost end)
+   493→747:        if not attached or not screenGui.Parent then
+   494→753:                        screenGui.Parent = fallback
+   495→769:        local oldOverlay = screenGui.Parent and screenGui.Parent:FindFirstChild(overlayName)
+   496→778:        local overlayAttached = pcall(function() overlayGui.Parent = screenGui.Parent end)
+   497→1128:                while screenGui.Parent do
+   498→
+   499→=== slider holder/track construction (pre-knob) ===
+   500→                function tab:CreateSlider(scfg)
+   501→                        scfg = scfg or {}
+   502→                        local nameText  = scfg.Name or "Slider"
+   503→                        local range     = scfg.Range or { 0, 100 }
+   504→                        local minVal    = tonumber(range[1]) or 0
+   505→                        local maxVal    = tonumber(range[2]) or 100
+   506→                        if maxVal <= minVal then maxVal = minVal + 1 end
+   507→                        local increment = math.max(tonumber(scfg.Increment) or 1, 0.00001)
+   508→                        local suffix    = scfg.Suffix or ""
+   509→                        local callback  = scfg.Callback
+   510→                        local value     = math.clamp(scfg.CurrentValue or minVal, minVal, maxVal)
+   511→                        local defaultValue = value
+   512→
+   513→                        local holder, hStroke = makeHolder(52)
+   514→                        local lbl = Instance.new("TextLabel")
+   515→                        lbl.Size = UDim2.new(1, -80, 0, 18)
+   516→                        lbl.Position = UDim2.new(0, 14, 0, 6)
+   517→                        lbl.BackgroundTransparency = 1
+   518→                        lbl.Font = Enum.Font.GothamMedium
+   519→                        lbl.TextSize = 13
+   520→                        lbl.TextColor3 = C.text
+   521→                        lbl.TextXAlignment = Enum.TextXAlignment.Left
+   522→                        lbl.Text = nameText
+   523→                        lbl.Parent = holder
+   524→
+   525→                        local valLbl = Instance.new("TextLabel")
+   526→                        valLbl.Size = UDim2.new(0, 64, 0, 18)
+   527→                        valLbl.Position = UDim2.new(1, -72, 0, 6)
+   528→                        valLbl.BackgroundTransparency = 1
+   529→                        valLbl.Font = Enum.Font.GothamBold
+   530→                        valLbl.TextSize = 13
+   531→                        valLbl.TextColor3 = C.accent
+   532→                        valLbl.TextXAlignment = Enum.TextXAlignment.Right
+   533→                        valLbl.Text = tostring(value) .. suffix
+   534→                        valLbl.Parent = holder
+   535→
+   536→                        local track = Instance.new("Frame")
+   537→                        track.Size = UDim2.new(1, -28, 0, 6)
+   538→                        track.Position = UDim2.new(0, 14, 0, 36)
+   539→                        track.BackgroundColor3 = C.track
+   540→                        track.BorderSizePixel = 0
+   541→                        track.Parent = holder
+   542→                        corner(track, UDim.new(1, 0))
+   543→
+   544→                        local fill = Instance.new("Frame")
+   545→                        fill.Size = UDim2.new(0, 0, 1, 0)
+   546→                        fill.BackgroundColor3 = C.accent
+   547→                        fill.BorderSizePixel = 0
+   548→                        fill.Parent = track
+   549→                        corner(fill, UDim.new(1, 0))
+   550→                        local fillGrad = gradient(fill, ColorSequence.new{
+   551→                                ColorSequenceKeypoint.new(0, C.accentDim),
+   552→                                ColorSequenceKeypoint.new(1, C.accentHi),
+   553→                        })
+   554→
+   555→                        local knob = Instance.new("Frame")
+   556→                        knob.Size = UDim2.new(0, 18, 0, 18)
+   557→                        knob.Position = UDim2.new(0, -9, 0.5, -9)
+   558→                        knob.BackgroundColor3 = C.white
+   559→                        knob.BorderSizePixel = 0
+   560→                        knob.Parent = track
+   561→                        corner(knob, UDim.new(1, 0))
+   562→                        local knobStroke = stroke(knob, C.accent, 2)
+   563→                        -- Subtle knob shadow for depth.
+   564→                        local knobShadow = Instance.new("ImageLabel")
+   565→                        knobShadow.Size = UDim2.new(1, 8, 1, 8)
+   566→                        knobShadow.Position = UDim2.new(0, -4, 0, -4)
+   567→                        knobShadow.BackgroundTransparency = 1
+   568→                        knobShadow.Image = "rbxassetid://1316045217"
+   569→                        knobShadow.ImageColor3 = Color3.new(0, 0, 0)
+   570→                        knobShadow.ImageTransparency = 0.7
+   571→                        knobShadow.ZIndex = knob.ZIndex - 1
+   572→                        knobShadow.Parent = knob
+   573→
+   574→So the knob's initial position is set during construction, but then immediately updated based on the actual starting value when update(false) is called right after the object is defined, ensuring the slider knob reflects the correct position from the start.
+   575→The key insight is that hit (the transparent overlay button) is parented to the holder, not the track, and sits above everything with a higher Z-index than the knob—this ensures input events are captured uniformly across the entire slider area rather than being stolen by clicks on the visible track or knob elements themselves.
+   576→When the user clicks, hit.InputBegan fires and calls setFromX using the click's screen coordinates mapped against the track's absolute position and size, which works fine as long as those values are current at click time. The real culprit for the positioning bug is likely a layout race condition where the track's AbsolutePosition hasn't been updated yet, especially since this slider appears to be an item in a vertical UIListLayout that automatically positions elements.
+   577→If the slider is the first item on a newly visible tab and the UIListLayout hasn't finished its layout pass before the first click fires, the holder frame could still be at its default position (0,0) instead of where the layout system will eventually place it. This would cause the coordinate mapping to be wrong on that first interaction, then self-correct once UIListLayout completes its normal pass on the next frame and subsequent clicks read the correct values.
+   578→The core issue is reading .AbsolutePosition synchronously without waiting for the layout engine to catch up after a visibility change or creation. I should check where makeHolder is defined to see if it's a shared factory for frames arranged via UIListLayout in the scrolling tab content, and verify whether the tab becomes visible immediately or if there's a delayed activation that gives the layout system time to settle before user interaction is possib…Show lessReading the main frame/shadow/body construction to check corner radius and stroke consistency for the bottom-left bleed issueThe frame has clipping enabled to its rectangular bounds, rounded corners with a 20-pixel radius, and a thin semi-transparent 1.5-pixel stroke that's about 55% opaque—so it clips descendants to the rectangular shape rather than the rounded silhouette.
+   579→Now I'm checking the statusBar construction to see its parent, size, position, background color, and whether it also gets the same 20-pixel corner radius applied. Since the statusBar is only 24 pixels tall but gets a 20-pixel corner radius, it's essentially a pill shape—and since it sits at the bottom of the window inside the frame, its bottom corners should align with the frame's bottom corners if positioned correctly.
+   580→The problem is that the statusBar's top corners also get rounded, which creates unwanted quarter-circle notches at the top-left and top-right edges. This means the top edge isn't a clean straight line flush with the content above it—instead, there are small rounded cutouts that either reveal the frame's background color behind it or create visible gaps depending on whether the statusBar has a different background color than the frame itself.
+   581→Actually, stepping back—the real bug might be simpler. The frame's stroke is only 1.5px thick with 55% transparency, so it's quite subtle, while the frame's own corner radius is...
+   582→Wait, I need to figure out whether the statusBar is even a child of frame or body. Since body is positioned below the header and spans the rest of the window height, and the statusBar sits at the very bottom with a height of 24, the hierarchy matters for understanding where that black artifact is actually appearing.
+   583→Let me check the exact code around lines 1470-1500 to see the statusBar's parent assignment, background color, and whether there's any existing comment about this visual issue.Show lessReading the status bar construction (bottom bar with the ready/status dot) to check its corner radius, size, and parenting for the bottom-left bleed issueNow I see the layout structure clearly. The status bar spans the full width at 24 pixels tall, anchored to the bottom of the body, and the corner function applies a 20-pixel radius to all four corners of it.
+   584→Then there's sbFix — a full-width rectangle covering just the top half of the status bar (12 pixels), with the same panel color and a higher Z-index so it renders on top. Since it has no rounded corners applied, it acts as a solid overlay that masks the incorrectly rounded top corners of the status bar, making that edge appear square and flush against the content above it.
+   585→This is a partial workaround though — they've patched the top corners issue but haven't addressed whether the status bar's bottom corners align correctly with the frame's rounded silhouette at the very bottom. Since the status bar's bottom edge sits exactly flush with the frame's bottom edge (both have the same left/right boundaries), I need to verify if those bottom corners are clipping properly to match the frame's rounded corners.
+   586→The real problem is that frame.ClipsDescendants only clips to rectangular bounds, not a rounded mask, so even though both the frame and status bar have the same corner radius applied, the clipping isn't creating the rounded effect at the bottom where they meet. rendering the frame with a corner mask so the background truly doesn't show pixels in the rounded corners, revealing whatever's behind it (the screenGui background, game viewport, or layered elements like shadow). The statusBar, which is a child of body and also has its own dark background with a UICorner applied, should similarly have its corners visually cut, but I need to figure out how its clipping interacts with body's ClipsDescendants setting.
+   587→If statusBar is perfectly aligned with frame's bottom-left corner and both use the same R.outer=20 radius, their rounded corners should trace the same arc and appear seamless. …Show lessReading the full header/brand-mark construction to diagnose the top-left icon element flagged in the screenshotSo the brand mark is a 28x28 pixel frame positioned 16 pixels from the left and 13 pixels from the top of the header, with a dark accent background color and rounded corners at 7 pixels radius, plus a stroke applied.
+   588→The brandLetter is a text label that fills the entire brand mark, using the GothamBlack font at 14 pixels, displaying the first letter of the window name in uppercase (or "R" as a fallback). So if the window is "DOMINUS V8", it should show "D" — but the screenshot appears to show an orange diamond or gem shape instead, which is puzzling since a capital "D" wouldn't naturally look like that. This could be a font rendering issue or a placeholder character if the font failed to load properly.
+   589→Actually, I'm realizing the window name might include the crown emoji prepended to it — if windowName is literally "👑 DOMINUS V8", then extracting the first character would grab the first byte of the UTF-8-encoded emoji rather than the "D", which would explain why the visual doesn't match expectations. .sub() truncating multi-byte UTF-8 sequences to a single byte, which is exactly what's causing the replacement character to appear in the Roblox UI. The replacement character that appears as an orange diamond is exactly what Roblox renders when it encounters invalid UTF-8 bytes, which matches the user's observation perfectly. Since string.upper() operates byte-by-byte and doesn't error on invalid sequences, the code runs without crashing but produces the garbled output. I should verify whether the demo config actually includes the crown emoji in the window name to confirm this is the source. So when string.sub() grabs just the first byte of the crown emoji, it's capturing only the incomplete UTF-8 lead byte instead of the full four-byte sequence, which renders as that broken diamond character we see in the screenshot. That's why the full title displays the crown perfectly—it has the complete emoji bytes—while the badge shows the corrupted glyph. …Show lessChecking for any existing text-depth styling (stroke/glow) and confirming how windowName is derived, to finish diagnosing the font and brand-mark issuesbashFILE=/mnt/user-data/uploads/RezurXlibrary.txt
+   590→echo "=== TextStroke usage (text depth/glow) ==="
+   591→grep -n "TextStrokeTransparency\|TextStrokeColor3" "$FILE" | head -20
+   592→echo ""
+   593→echo "=== windowName construction / where it's set (emoji-prefixed?) ==="
+   594→grep -n "windowName\s*=" "$FILE" | head -20
+   595→echo ""
+   596→echo "=== confirm resizeHandle full local context once more (frame corner radius vs handle) ==="
+   597→sed -n '1569,1588p' "$FILE"
+   598→Output=== TextStroke usage (text depth/glow) ===
+   599→
+   600→=== windowName construction / where it's set (emoji-prefixed?) ===
+   601→605:        local windowName   = cfg.Name or "RezurX UI"
+   602→
+   603→=== confirm resizeHandle full local context once more (frame corner radius vs handle) ===
+   604→        -- [FIX] Resize handle (bottom-right corner) — drag to resize window
+   605→        local resizeHandle = Instance.new("TextButton")
+   606→        resizeHandle.Name = "ResizeHandle"
+   607→        resizeHandle.Size = UDim2.new(0, 22, 0, 22)
+   608→        resizeHandle.Position = UDim2.new(1, -22, 1, -22)
+   609→        resizeHandle.BackgroundColor3 = C.panelAlt
+   610→        resizeHandle.BackgroundTransparency = 0.3
+   611→        resizeHandle.Text = "⇲"
+   612→        resizeHandle.TextColor3 = C.muted
+   613→        resizeHandle.Font = Enum.Font.GothamBold
+   614→        resizeHandle.TextSize = 12
+   615→        resizeHandle.AutoButtonColor = false
+   616→        resizeHandle.BorderSizePixel = 0
+   617→        resizeHandle.ZIndex = 8
+   618→        resizeHandle.Selectable = true
+   619→        resizeHandle.Visible = resizable
+   620→        resizeHandle.Parent = frame
+   621→        corner(resizeHandle, R.small)
+   622→        local resizeStroke = stroke(resizeHandle, C.border, 1)
+   623→        resizeHandle.MouseEnter:Connect(function()
+   624→I'm seeing that TextStrokeTransparency and TextStrokeColor3 aren't used anywhere in the file, which confirms the fonts lack any depth or glow effects—it's not a font family issue since there's already decent variety, but rather the complete absence of stroke-based styling and no letter-spacing either.
+   625→The windowName configuration directly pulls from cfg.Name, and given the screenshot displays "👑 DOMINUS V8" as the title, the config must have passed that exact string with the crown emoji as a literal prefix. When brandLetter.Text extracts just the first character using string.sub(), it's grabbing only the first byte of the emoji's multi-byte UTF-8 sequence, creating an invalid partial sequence that renders as the replacement character—that diamond-shaped glyph visible in the screenshot.
+   626→The resize handle is positioned at (-22, -22) with a 22×22 size, parented to the frame with rounded corners set to 7 pixels.  The frame itself has a 20-pixel outer corner radius, so this mismatch between the two corner values (7 vs 20) combined with the flush corner positioning (0 inset) is what causes the handle to overhang visibly.
+   627→I've also checked all the task.defer and task.wait calls throughout the codebase—they're scattered at various lines but none are specifically guarding the initial slider render to wait for AbsolutePosition to stabilize, confirming there's no explicit safeguard for layout-timing issues.
+   628→Now I have concrete diagnoses for all five issues. The top icon question mark is caused by the code extracting the first byte of windowName using string.sub(...,1,1) instead of handling full characters—since the window name apparently starts with a multi-byte emoji like 👑, this grabs an incomplete UTF-8 sequence that renders as the Unicode replacement character, which is exactly the diamond/question mark the user circled.
+   629→…Show lessDoneWent through the source. Here's what's actually happening, with line refs:
+   630→1. Top icon → it really is showing "?"
+   631→brandLetter.Text (~line 1001) does string.upper(string.sub(windowName, 1, 1)) — grabbing the first byte of the window name, not the first character. Your title starts with 👑, a 4-byte UTF-8 emoji. Byte 1 alone is an invalid half-character, and Roblox renders that as the replacement glyph — the diamond-with-a-mark shape in your screenshot. Your instinct was right, it just doesn't look like a typical "?".
+   632→2. Bottom-left bleed
+   633→frame rounds at R.outer (20px, line 871). statusBar — only 24px tall (STATUSBAR_H, line 829) — gets its own independent corner(statusBar, R.outer) (line 1482), same 20px radius, sitting flush against frame's own bottom edge/sides. ClipsDescendants only clips to the rectangle, not to the rounded shape, so you've got two separately-drawn 20px corners that have to align pixel-perfectly against a thin 1.5px, 55%-transparent stroke. There's already an sbFix patch (line 1483) squaring off the bar's top corners for this exact reason — nothing equivalent was done for the bottom, which is exactly where it's leaking.
+   634→3. Slider teleport on first drag
+   635→setFromX (line 2872) computes the value straight from track.AbsolutePosition/AbsoluteSize inside InputBegan (line 2914). Those properties are filled in by Roblox's layout engine and can still read stale/zero on the very first click after the UI is built — before a layout pass has actually run. One bad read → percentage clamps to 0 or 1 → knob jumps to the corner. Every read after that is correct, so it "just works" from then on. Nothing in the file defers input until layout settles.
+   636→4. Resize handle overhang
+   637→resizeHandle (22×22, line 1570) sits flush at (1,-22,1,-22) directly on frame, zero inset from the true corner — but it's rounded at R.small (7px) while frame rounds at R.outer (20px). Same clipping gap as #2: the handle's shallow-rounded square sits in the wedge frame already curved away, so it visually pokes past the edge.
+   638→5. Fonts
+   639→Variety's already there — GothamBlack for the title, GothamBold/Medium for labels, Enum.Font.Code on every stat/value field. What's actually missing is depth: TextStrokeTransparency/TextStrokeColor3 (Roblox's shadow/glow mechanism for text) is used zero times in the whole file. That's the flat look, not the font choice. Letter-spacing has no native Roblox property, so that one's a bigger lift than the rest.
+
+[showing lines 300-639 of 640; use offset=640 with limit to continue reading]

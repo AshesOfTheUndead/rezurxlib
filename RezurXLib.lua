@@ -1251,17 +1251,18 @@ function Library:CreateWindow(cfg)
         local floatIcon = Instance.new("TextButton")
         floatIcon.Name = "FloatIcon"
         floatIcon.Size = UDim2.new(0, 52, 0, 52)
-        floatIcon.Position = UDim2.new(0, 10, 0, 10)
+        -- [FIX] Center the ball on screen instead of top-left corner
+        floatIcon.Position = UDim2.new(0.5, -26, 0.5, -26)
         floatIcon.BackgroundColor3 = C.accent
-        -- A simple monogram is rendered consistently by Gotham; emoji glyphs
-        -- vary by platform and can turn into a missing-character box.
-        floatIcon.Text = "R"
-        floatIcon.Font = Enum.Font.GothamBold
-        floatIcon.TextSize = 20
+        -- [FIX] Use crown emoji for the floating restore ball
+        floatIcon.Text = "👑"
+        floatIcon.Font = Enum.Font.GothamMedium
+        floatIcon.TextSize = 24
         floatIcon.TextColor3 = C.white
         floatIcon.AutoButtonColor = false
         floatIcon.BorderSizePixel = 0
-        floatIcon.ZIndex = 100
+        -- [FIX] ZIndex very high so ball is above all UI
+        floatIcon.ZIndex = 10000
         floatIcon.Selectable = true
         floatIcon.Visible = false
         floatIcon.Parent = overlayGui
@@ -1272,21 +1273,23 @@ function Library:CreateWindow(cfg)
         floatIcon.InputBegan:Connect(function(inp)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
                         local startDrag = inp.Position
+                        -- [FIX] Track the starting Position offset (not AbsolutePosition)
+                        -- AbsolutePosition may not update in-time within the same frame,
+                        -- causing the Y to get stuck. Using Position offset directly avoids
+                        -- the IgnoreGuiInset offset issue and the layout lag.
+                        local startPos = floatIcon.Position
                         floatDragMoved = false
                         local vp = getViewport()
+                        local iconSize = floatIcon.AbsoluteSize.X
                         registerDrag("floatIcon", inp, function(pos)
                                 local d = pos - startDrag
                                 if d.Magnitude > 6 then floatDragMoved = true end
-                                -- [FIX] Re-read AbsolutePosition every frame and apply as a nudge
-                                -- (current → target) so any IgnoreGuiInset offset cancels out
-                                -- instead of being baked in at drag-start.
-                                local cur = floatIcon.AbsolutePosition
-                                local targetX = math.clamp(cur.X + d.X, 0, math.max(0, vp.X - floatIcon.AbsoluteSize.X))
-                                local targetY = math.clamp(cur.Y + d.Y, 0, math.max(0, vp.Y - floatIcon.AbsoluteSize.Y))
-                                local scale = overlayGui == screenGui
-                                        and math.max(uiScale.Scale, 0.01) or 1
-                                floatIcon.Position = UDim2.new(0, targetX / scale, 0, targetY / scale)
-                                startDrag = pos  -- update for next delta
+                                -- Compute target in screen pixels from startPos offset
+                                local startScreenX = startPos.X.Offset
+                                local startScreenY = startPos.Y.Offset
+                                local targetX = math.clamp(startScreenX + d.X, 0, math.max(0, vp.X - iconSize))
+                                local targetY = math.clamp(startScreenY + d.Y, 0, math.max(0, vp.Y - iconSize))
+                                floatIcon.Position = UDim2.new(0, targetX, 0, targetY)
                         end)
                 end
         end)
@@ -2109,8 +2112,10 @@ function Library:CreateWindow(cfg)
                 -- Size synchronously from the rendered text. The rail scrolls
                 -- horizontally, so long developer-provided titles stay fully
                 -- readable instead of being cut off by a fixed maximum width.
-                local measured = TextService:GetTextSize(btnText, 12, Enum.Font.GothamBold, Vector2.new(1000, 24))
-                local tabWidth = math.max(76, math.ceil(measured.X) + 28)
+                -- [FIX] Use GothamMedium for better emoji rendering + add 8px extra
+                -- width since TextService:GetTextSize may undermeasure emoji glyphs.
+                local measured = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium, Vector2.new(1000, 24))
+                local tabWidth = math.max(76, math.ceil(measured.X) + 36)
                 btn.Size = UDim2.new(0, tabWidth, 0, TABBAR_H - 10)
                 btn.BackgroundColor3 = C.tabChip
                 btn.AutoButtonColor = false
@@ -2130,7 +2135,7 @@ function Library:CreateWindow(cfg)
                 textLbl.Position = UDim2.fromOffset(8, 0)
                 textLbl.BackgroundTransparency = 1
                 textLbl.Active = false
-                textLbl.Font = Enum.Font.GothamBold
+                textLbl.Font = Enum.Font.GothamMedium
                 textLbl.TextSize = 12
                 textLbl.TextColor3 = C.text
                 textLbl.TextXAlignment = Enum.TextXAlignment.Center
@@ -2169,7 +2174,7 @@ function Library:CreateWindow(cfg)
                 local function applyTabTitle()
                         btnText = iconText ~= "" and (iconText .. "  " .. tabName) or tabName
                         textLbl.Text = btnText
-                        local newMeasure = TextService:GetTextSize(btnText, 12, Enum.Font.GothamBold, Vector2.new(1000, 24))
+                        local newMeasure = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium, Vector2.new(1000, 24))
                         local newWidth = math.max(76, math.ceil(newMeasure.X) + 28)
                         btn.Size = UDim2.new(0, newWidth, 0, TABBAR_H - 10)
                         task.defer(function()

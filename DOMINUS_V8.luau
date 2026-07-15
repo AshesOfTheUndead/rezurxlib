@@ -395,7 +395,7 @@ end
 
 -- ═══ TAB: Farm ═══
 local UI = {}  -- [FIX] holds refs to every interactive element so Load can :Set() them
-local FarmTab = Window:CreateTab("Farm", "F")
+local FarmTab = Window:CreateTab("Farm", "🌾")
 FarmTab:CreateSection("🔥 MODE & SPEED")
 UI.FarmMode = FarmTab:CreateDropdown({
     Name = "⚡ Mode",
@@ -471,7 +471,7 @@ task.spawn(function()
 end)
 
 -- ═══ TAB: Move ═══
-local MoveTab = Window:CreateTab("Move", "M")
+local MoveTab = Window:CreateTab("Move", "🏃")
 MoveTab:CreateSection("⚡ WALK & JUMP")
 local ot = MoveTab:CreateToggle({
     Name = "🔧 Override Stats: OFF",
@@ -506,7 +506,7 @@ local noclipToggle = MoveTab:CreateToggle({
 UI.Noclip = noclipToggle
 
 -- ═══ TAB: Identity ═══
-local IdTab = Window:CreateTab("ID", "ID")
+local IdTab = Window:CreateTab("ID", "🎭")
 IdTab:CreateSection("👤 CHAT IDENTITY")
 UI.TitlePreset = IdTab:CreateDropdown({Name = "🏷️ Title", Options = {"GLOBAL", "SERVER ANNOUNCEMENT", "👑Head Administrator👑", "👑Head Executive Lead Developer👑", "None"}, CurrentOption = "None", Callback = function(v) Config.CustomTag=(v=="None" or v=="") and "" or v UI.CustomTitle:Set(Config.CustomTag) end})
 UI.NamePreset = IdTab:CreateDropdown({Name = "👤 Username", Options = {"RezurXshin☑️", "Jandel", "Administrator", "None"}, CurrentOption = "None", Callback = function(v) Config.UserName=(v=="None" or v=="") and "" or v UI.CustomName:Set(Config.UserName) end})
@@ -518,7 +518,7 @@ UI.UserColor = IdTab:CreateColorPicker({Name = "🎨 User Color", Color = Config
 UI.MsgColor = IdTab:CreateColorPicker({Name = "🎨 Msg Color", Color = Config.MessageColor, Callback = function(c) Config.MessageColor=c end})
 
 -- ═══ TAB: Chat ═══
-local ChatTab = Window:CreateTab("Chat", "C")
+local ChatTab = Window:CreateTab("Chat", "💬")
 ChatTab:CreateSection("👻 GHOST SHOUT")
 local chatInput = ChatTab:CreateInput({Name = "💬 Message", PlaceholderText = "Type message...", Callback = function(v) end})
 ChatTab:CreateButton({Name = "📤 Send", Callback = function()
@@ -532,7 +532,7 @@ end})
 ChatTab:CreateButton({Name = "🧹 Clear", Callback = function() chatInput:Set("") notify("💬 Chat", "Cleared", 2, "info") end})
 
 -- ═══ TAB: Lab ═══
-local LabTab = Window:CreateTab("Lab", "L")
+local LabTab = Window:CreateTab("Lab", "🧪")
 LabTab:CreateSection("⚙️ EXPERIMENTS")
 UI.AntiAfk = LabTab:CreateToggle({Name = "🛡️ Anti-AFK", CurrentValue = true, Callback = function(t) Config.AntiAfk=t end})
 local pvpToggle = LabTab:CreateToggle({
@@ -570,7 +570,7 @@ UI.Esp = LabTab:CreateToggle({Name = "👁️ ESP", CurrentValue = false, Callba
 LabTab:CreateButton({Name = "🧹 Clear ESP", Callback = function() clearEsp() notify("👁️ ESP", "Cleared", 3, "info") end})
 
 -- ═══ TAB: System ═══
-local SysTab = Window:CreateTab("Sys", "S")
+local SysTab = Window:CreateTab("Sys", "⚙")
 SysTab:CreateSection("💾 CONFIGS")
 -- [FIX] Named config system: save with name, load by name, delete, rename
 local CONFIGS_FILE = "DOMINUS_Configs.json"
@@ -788,7 +788,7 @@ SysTab:CreateButton({Name = "❌ Destroy UI (confirm)", Callback = function()
 end})
 
 -- ═══ TAB: About ═══
-local AboutTab = Window:CreateTab("About", "A")
+local AboutTab = Window:CreateTab("About", "ℹ")
 AboutTab:CreateSection("👑 ABOUT")
 AboutTab:CreateParagraph({Title = "👑 DOMINUS V8", Content = "👑 DOMINUS V8\n🔥 Maximum Power Edition\n\nMade by RezurXshin\nCreator of RezurXLabs\n\n🛡️ All rights reserved to RezurXshin (Creator of RezurXLabs)\n\n⚙️ Engine: Hybrid Farm + math.huge\n👻 Noclip: V777 + Improved\n🌙 Overnight Mode\n🚀 Turbo Boost\n💾 Save/Load Profiles\n\nPowered by RezurXLib"})
 AboutTab:CreateSection("👑 CREDITS")

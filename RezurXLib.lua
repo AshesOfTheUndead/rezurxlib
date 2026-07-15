@@ -940,10 +940,8 @@ function Library:CreateWindow(cfg)
         }, 100)
 
         local hFix = Instance.new("Frame")
-        -- [FIX] Make hFix taller (0.55 instead of 0.5) to fully cover the bottom
-        -- rounded corner of the header and eliminate the gap between header and body
-        hFix.Size = UDim2.new(1, 0, 0.6, 0)
-        hFix.Position = UDim2.new(0, 0, 0.4, 0)
+        hFix.Size = UDim2.new(1, 0, 0.5, 0)
+        hFix.Position = UDim2.new(0, 0, 0.5, 0)
         -- [FIX] Blend headerA and headerB for the midpoint color instead of
         -- using pure headerB — the gradient only reaches headerB at the very
         -- bottom, so a pure headerB patch created a visible seam.
@@ -1275,15 +1273,10 @@ function Library:CreateWindow(cfg)
         floatIcon.InputBegan:Connect(function(inp)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
                         local startDrag = inp.Position
-                        -- [FIX] Convert starting position to absolute screen pixels.
-                        -- Position may use scale (0.5) for centering, so .Offset alone
-                        -- doesn't give the real screen position. AbsolutePosition does.
-                        -- We read it ONCE here (not every frame) to avoid the frame-lag
-                        -- bug, and convert to offset-only immediately so future drags
-                        -- use pure offset (no scale).
-                        local startAbs = floatIcon.AbsolutePosition
-                        -- Snap to offset-only position to eliminate scale-based teleport
-                        floatIcon.Position = UDim2.new(0, startAbs.X, 0, startAbs.Y)
+                        -- [FIX] Track the starting Position offset (not AbsolutePosition)
+                        -- AbsolutePosition may not update in-time within the same frame,
+                        -- causing the Y to get stuck. Using Position offset directly avoids
+                        -- the IgnoreGuiInset offset issue and the layout lag.
                         local startPos = floatIcon.Position
                         floatDragMoved = false
                         local vp = getViewport()
@@ -1291,8 +1284,11 @@ function Library:CreateWindow(cfg)
                         registerDrag("floatIcon", inp, function(pos)
                                 local d = pos - startDrag
                                 if d.Magnitude > 6 then floatDragMoved = true end
-                                local targetX = math.clamp(startPos.X.Offset + d.X, 0, math.max(0, vp.X - iconSize))
-                                local targetY = math.clamp(startPos.Y.Offset + d.Y, 0, math.max(0, vp.Y - iconSize))
+                                -- Compute target in screen pixels from startPos offset
+                                local startScreenX = startPos.X.Offset
+                                local startScreenY = startPos.Y.Offset
+                                local targetX = math.clamp(startScreenX + d.X, 0, math.max(0, vp.X - iconSize))
+                                local targetY = math.clamp(startScreenY + d.Y, 0, math.max(0, vp.Y - iconSize))
                                 floatIcon.Position = UDim2.new(0, targetX, 0, targetY)
                         end)
                 end
@@ -1573,16 +1569,14 @@ function Library:CreateWindow(cfg)
         -- [FIX] Resize handle (bottom-right corner) — drag to resize window
         local resizeHandle = Instance.new("TextButton")
         resizeHandle.Name = "ResizeHandle"
-        -- [FIX] Smaller (18px) and moved inward (offset -20) so it fits inside
-        -- the rounded corner instead of sticking out past the window edge
-        resizeHandle.Size = UDim2.new(0, 18, 0, 18)
-        resizeHandle.Position = UDim2.new(1, -20, 1, -20)
+        resizeHandle.Size = UDim2.new(0, 22, 0, 22)
+        resizeHandle.Position = UDim2.new(1, -22, 1, -22)
         resizeHandle.BackgroundColor3 = C.panelAlt
         resizeHandle.BackgroundTransparency = 0.3
         resizeHandle.Text = "⇲"
         resizeHandle.TextColor3 = C.muted
-        resizeHandle.Font = Enum.Font.GothamMedium
-        resizeHandle.TextSize = 10
+        resizeHandle.Font = Enum.Font.GothamBold
+        resizeHandle.TextSize = 12
         resizeHandle.AutoButtonColor = false
         resizeHandle.BorderSizePixel = 0
         resizeHandle.ZIndex = 8
@@ -2141,8 +2135,8 @@ function Library:CreateWindow(cfg)
                 textLbl.Position = UDim2.fromOffset(8, 0)
                 textLbl.BackgroundTransparency = 1
                 textLbl.Active = false
-                textLbl.Font = Enum.Font.GothamBold
-                textLbl.TextSize = 13
+                textLbl.Font = Enum.Font.GothamMedium
+                textLbl.TextSize = 12
                 textLbl.TextColor3 = C.text
                 textLbl.TextXAlignment = Enum.TextXAlignment.Center
                 textLbl.TextTruncate = Enum.TextTruncate.AtEnd

@@ -998,8 +998,17 @@ function Library:CreateWindow(cfg)
         brandLetter.Font = Enum.Font.GothamBlack
         brandLetter.TextSize = 14
         brandLetter.TextColor3 = C.accentHi
-        brandLetter.Text = (string.sub(windowName, 1, 1) ~= ""
-                and string.upper(string.sub(windowName, 1, 1))) or "R"
+        -- [FIX] string.sub(byte 1) breaks on multi-byte UTF-8 (emoji like 👑).
+        -- Use utf8 library to get the first actual character. If the first
+        -- character is non-ASCII (emoji), fall back to "R" since emoji don't
+        -- render well in GothamBlack at 14px.
+        local firstChar = (utf8 and utf8.sub and utf8.sub(windowName, 1, 1)) or string.sub(windowName, 1, 1)
+        local firstByte = string.byte(firstChar or "") or 0
+        if firstByte > 127 then
+                brandLetter.Text = "R"  -- emoji or non-ASCII, use fallback
+        else
+                brandLetter.Text = string.upper(firstChar) or "R"
+        end
         brandLetter.ZIndex = 6
         brandLetter.Parent = brandMark
         onTheme(function()
@@ -1048,6 +1057,8 @@ function Library:CreateWindow(cfg)
         logo.Font = Enum.Font.GothamBlack
         logo.TextSize = 18
         logo.TextColor3 = C.text
+        logo.TextStrokeTransparency = 0.5
+        logo.TextStrokeColor3 = Color3.new(0, 0, 0)
         logo.TextXAlignment = Enum.TextXAlignment.Left
         logo.TextTruncate = Enum.TextTruncate.AtEnd
         logo.ZIndex = 5
@@ -1087,6 +1098,8 @@ function Library:CreateWindow(cfg)
         fpsLabel.Size = UDim2.new(0.5, 0, 1, 0)
         fpsLabel.BackgroundTransparency = 1
         fpsLabel.Font = Enum.Font.Code
+        fpsLabel.TextStrokeTransparency = 0.5
+        fpsLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
         fpsLabel.TextSize = 12
         fpsLabel.TextColor3 = C.green
         fpsLabel.Text = "60 FPS"
@@ -1106,6 +1119,8 @@ function Library:CreateWindow(cfg)
         pingLabel.Position = UDim2.new(0.5, 0, 0, 0)
         pingLabel.BackgroundTransparency = 1
         pingLabel.Font = Enum.Font.Code
+        pingLabel.TextStrokeTransparency = 0.5
+        pingLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
         pingLabel.TextSize = 12
         pingLabel.TextColor3 = C.green
         pingLabel.Text = "— ms"
@@ -1479,7 +1494,12 @@ function Library:CreateWindow(cfg)
         statusBar.BorderSizePixel = 0
         statusBar.ClipsDescendants = true
         statusBar.Parent = body
-        corner(statusBar, R.outer)
+        -- [FIX] Don't round the status bar — frame already has ClipsDescendants=true
+        -- and R.outer corners. Rounding the status bar separately creates a mismatch
+        -- where the statusBar's 20px radius doesn't align with frame's 20px radius,
+        -- causing a visible bleed at the bottom corners. The sbFix already squares
+        -- off the top; removing the bottom rounding lets frame's clip handle it.
+        -- corner(statusBar, R.outer)  -- removed
         local sbFix = Instance.new("Frame")
         sbFix.Size = UDim2.new(1, 0, 0.5, 0)
         sbFix.BackgroundColor3 = C.panel
@@ -1569,14 +1589,17 @@ function Library:CreateWindow(cfg)
         -- [FIX] Resize handle (bottom-right corner) — drag to resize window
         local resizeHandle = Instance.new("TextButton")
         resizeHandle.Name = "ResizeHandle"
-        resizeHandle.Size = UDim2.new(0, 22, 0, 22)
-        resizeHandle.Position = UDim2.new(1, -22, 1, -22)
+        -- [FIX] Smaller (18px) and inset 2px from corner (-20) so it sits
+        -- inside frame's 20px rounded corner instead of overhanging the edge.
+        -- Corner radius increased to match frame's curve better.
+        resizeHandle.Size = UDim2.new(0, 18, 0, 18)
+        resizeHandle.Position = UDim2.new(1, -20, 1, -20)
         resizeHandle.BackgroundColor3 = C.panelAlt
         resizeHandle.BackgroundTransparency = 0.3
         resizeHandle.Text = "⇲"
         resizeHandle.TextColor3 = C.muted
-        resizeHandle.Font = Enum.Font.GothamBold
-        resizeHandle.TextSize = 12
+        resizeHandle.Font = Enum.Font.GothamMedium
+        resizeHandle.TextSize = 10
         resizeHandle.AutoButtonColor = false
         resizeHandle.BorderSizePixel = 0
         resizeHandle.ZIndex = 8
@@ -2139,6 +2162,8 @@ function Library:CreateWindow(cfg)
                 textLbl.TextSize = 12
                 textLbl.TextColor3 = C.text
                 textLbl.TextXAlignment = Enum.TextXAlignment.Center
+                textLbl.TextStrokeTransparency = 0.5
+                textLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
                 textLbl.TextTruncate = Enum.TextTruncate.AtEnd
                 textLbl.Text = btnText
                 textLbl.ZIndex = 5
@@ -2792,6 +2817,8 @@ function Library:CreateWindow(cfg)
                         valLbl.Font = Enum.Font.GothamBold
                         valLbl.TextSize = 13
                         valLbl.TextColor3 = C.accent
+					valLbl.TextStrokeTransparency = 0.4
+					valLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
                         valLbl.TextXAlignment = Enum.TextXAlignment.Right
                         valLbl.Text = tostring(value) .. suffix
                         valLbl.Parent = holder
@@ -2914,10 +2941,21 @@ function Library:CreateWindow(cfg)
                                 hit.InputBegan:Connect(function(inp)
                                         if inp.UserInputType == Enum.UserInputType.MouseButton1
                                                 or inp.UserInputType == Enum.UserInputType.Touch then
+                                                -- [FIX] Guard against stale AbsolutePosition on first click.
+                                                -- Roblox's layout engine may not have filled in
+                                                -- track.AbsolutePosition/AbsoluteSize yet on the very
+                                                -- first click after UI creation. If track width is 0 or
+                                                -- position is (0,0), skip the setFromX call — just
+                                                -- register the drag and let the next frame handle it.
+                                                local trackPos = track.AbsolutePosition
+                                                local trackSize = track.AbsoluteSize
+                                                local layoutReady = trackSize.X > 1 and trackPos.X > 0
                                                 -- The knob grows slightly while it is grabbed.
                                                 Tween(knob, T20, { Size = UDim2.new(0, 22, 0, 22) })
-                                                setFromX(inp.Position.X)
-                                                fireCallback()
+                                                if layoutReady then
+                                                        setFromX(inp.Position.X)
+                                                        fireCallback()
+                                                end
                                                 registerDrag(hit, inp, function(pos)
                                                         setFromX(pos.X)
                                                         fireCallback()

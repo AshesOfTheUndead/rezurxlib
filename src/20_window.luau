@@ -1278,6 +1278,11 @@ function Library:CreateWindow(cfg)
                         -- Position has scale 0.5/0.55, .Offset gives -WIN_W/2 → flinging
                         local startAbs = frame.AbsolutePosition
                         local moved = false
+                        local lastX = startAbs.X
+                        -- [v5.1.0] HARDWARE DRAG PHYSICS (spec): the window tilts
+                        -- with its movement vector — rotation = clamp(deltaX *
+                        -- 0.03, -3, 3) — and settles back to 0 with a Back ease
+                        -- when the drag ends. Feels like physical weight.
                         if Window.Focus then Window:Focus() end
                         registerDrag("window", inp, function(pos)
                                 local d = pos - dragStart
@@ -1291,9 +1296,24 @@ function Library:CreateWindow(cfg)
                                 end
                                 local targetX, targetY = clampWindowPosition(startAbs.X + d.X, startAbs.Y + d.Y)
                                 moveWindowTo(targetX, targetY)
+                                -- Tilt from the instantaneous horizontal movement.
+                                if not reducedMotion then
+                                        local velX = (startAbs.X + d.X) - lastX
+                                        lastX = startAbs.X + d.X
+                                        local tilt = math.clamp(velX * 0.55, -3, 3)
+                                        if math.abs(tilt) > 0.05 then
+                                                frame.Rotation = tilt
+                                        end
+                                end
                         end, function()
                                 setShadowTransparency("rest")
                                 Tween(frameStroke, T15, { Transparency = 0.55 })
+                                -- Settle the tilt back to level with an overshoot.
+                                if not reducedMotion then
+                                        Tween(frame, MT.enter, { Rotation = 0 })
+                                else
+                                        frame.Rotation = 0
+                                end
                         end)
                 end
         end))
@@ -1338,16 +1358,30 @@ function Library:CreateWindow(cfg)
         -- full-size dark pill that sat misaligned and rendered as a stray
         -- "black chip" at the rail's left edge. Chips sit at y=0..30 in the
         -- 40px bar; the underline lives in the 6px strip below them.
+        -- [v5.1.0] GLIDING GLASS PILLAR (spec): the active-tab indicator is a
+        -- glowing glass bar — a 4px core with a soft 10px glow backing, both
+        -- moving as ONE instance pair on ONE spring (interruptible, momentum
+        -- preserving). The glow is the pillar's aura, not a second effect.
         local tabIndicator = Instance.new("Frame")
-        tabIndicator.Name = "ActiveIndicator"
-        tabIndicator.Size = UDim2.new(0, 70, 0, 3)
-        tabIndicator.Position = UDim2.new(0, 4, 0, TABBAR_H - 5)
+        tabIndicator.Name = "ActiveIndicatorGlow"
+        tabIndicator.Size = UDim2.new(0, 70, 0, 10)
+        tabIndicator.Position = UDim2.new(0, 4, 0, TABBAR_H - 8)
         tabIndicator.BackgroundColor3 = C.accent
+        tabIndicator.BackgroundTransparency = 0.88
         tabIndicator.BorderSizePixel = 0
-        tabIndicator.ZIndex = 6
+        tabIndicator.ZIndex = 5
         tabIndicator.Parent = tabBar
-        corner(tabIndicator, UDim.new(1, 0))
-        local tabIndGrad = gradient(tabIndicator, ColorSequence.new{
+        corner(tabIndicator, PILL)
+        local tabIndCore = Instance.new("Frame")
+        tabIndCore.Name = "ActiveIndicator"
+        tabIndCore.Size = UDim2.new(1, 0, 0, 4)
+        tabIndCore.Position = UDim2.new(0, 0, 0.5, -2)
+        tabIndCore.BackgroundColor3 = C.accent
+        tabIndCore.BorderSizePixel = 0
+        tabIndCore.ZIndex = 6
+        tabIndCore.Parent = tabIndicator
+        corner(tabIndCore, PILL)
+        local tabIndGrad = gradient(tabIndCore, ColorSequence.new{
                 ColorSequenceKeypoint.new(0.0, C.accentDim),
                 ColorSequenceKeypoint.new(0.5, C.accentHi),
                 ColorSequenceKeypoint.new(1.0, C.accentDim),
@@ -1357,6 +1391,7 @@ function Library:CreateWindow(cfg)
                 tabBar.ScrollBarImageColor3 = C.accent
                 Tween(tabBarStroke, T20, { Color = C.border })
                 Tween(tabIndicator, T20, { BackgroundColor3 = C.accent })
+                Tween(tabIndCore, T20, { BackgroundColor3 = C.accent })
                 tabIndGrad.Color = ColorSequence.new{
                         ColorSequenceKeypoint.new(0.0, C.accentDim),
                         ColorSequenceKeypoint.new(0.5, C.accentHi),
@@ -1683,31 +1718,44 @@ function Library:CreateWindow(cfg)
         WindowJanitor:Add(closeCurrentPopup)
 
         -- ------------------------------------------------------------
-        -- [v4.4.0] UI SOUND DESIGN — crisp, subtle futuristic feedback.
-        -- Opt-in: cfg.Sounds = true (or a table with per-action overrides:
-        -- { Volume = 0.4, Click = "rbxassetid://…", Tab = …, Toggle = … }).
-        -- Defaults use rbxasset:// local assets — they ship with the engine,
-        -- so nothing depends on marketplace IDs loading. One base ping,
-        -- pitched per action, reads as a coherent sound language.
+        -- ------------------------------------------------------------
+        -- [v5.1.0] TACTILE SOUND MAPPING — the full Kinetic spec table.
+        -- Opt-in via cfg.Sounds = true (or per-action overrides:
+        -- { Volume = 0.4, Click = "rbxassetid://…", Tab = …, … }).
+        -- ONE engine-local rbxasset:// ping, pitched per action — a coherent
+        -- sound language with zero marketplace dependencies:
+        --   open 1.0/0.40   close 0.9/0.30   tab 1.2/0.25
+        --   toggleOn 1.15/0.30  toggleOff 0.85/0.30  click 1.0/0.35
+        --   sliderStep 1.3/0.15  toast 1.0/0.40 (dual-tone)  confirm 1.3/0.30
+        --   hum 0.55/0.12 (looped while a keybind listens for input)
         -- ------------------------------------------------------------
         local playSfx = function() end
+        local playSfxDual = function() end
+        local humSound = nil
+        local stopHum = function() end
         do
                 local scfg = cfg.Sounds == true and {} or cfg.Sounds
                 if type(scfg) == "table" then
-                        local volume = math.clamp(tonumber(scfg.Volume) or 0.35, 0, 1)
-                        local baseId = tostring(scfg.Click or "rbxasset://sounds/electronicpingshort.wav")
-                        local ids = {
-                                Click  = tostring(scfg.Click or baseId),
-                                Tab    = tostring(scfg.Tab or scfg.Click or baseId),
-                                Toggle = tostring(scfg.Toggle or scfg.Click or baseId),
-                                Notify = tostring(scfg.Notify or scfg.Click or baseId),
+                        local masterVol = math.clamp(tonumber(scfg.Volume) or 1, 0, 1)
+                        local baseId = "rbxasset://sounds/electronicpingshort.wav"
+                        local SPEC = {
+                                Open       = { pitch = 1.0,  vol = 0.40, id = scfg.Open or baseId },
+                                Close      = { pitch = 0.9,  vol = 0.30, id = scfg.Close or baseId },
+                                Tab        = { pitch = 1.2,  vol = 0.25, id = scfg.Tab or baseId },
+                                ToggleOn   = { pitch = 1.15, vol = 0.30, id = scfg.Toggle or baseId },
+                                ToggleOff  = { pitch = 0.85, vol = 0.30, id = scfg.Toggle or baseId },
+                                Click      = { pitch = 1.0,  vol = 0.35, id = scfg.Click or baseId },
+                                SliderStep = { pitch = 1.3,  vol = 0.15, id = scfg.SliderStep or baseId },
+                                Toast      = { pitch = 1.0,  vol = 0.40, id = scfg.Notify or baseId },
+                                Confirm    = { pitch = 1.3,  vol = 0.30, id = scfg.Confirm or baseId },
+                                Hum        = { pitch = 0.55, vol = 0.12, id = scfg.Hum or baseId },
                         }
-                        playSfx = function(kind, speed)
+                        local function playOne(spec, pitchMul)
                                 pcall(function()
                                         local s = Instance.new("Sound")
-                                        s.SoundId = ids[kind] or ids.Click
-                                        s.Volume = volume
-                                        s.PlaybackSpeed = speed or 1
+                                        s.SoundId = spec.id
+                                        s.Volume = spec.vol * masterVol
+                                        s.PlaybackSpeed = spec.pitch * (pitchMul or 1)
                                         s.Parent = SoundService
                                         SoundService:PlayLocalSound(s)
                                         task.delay(1.5, function()
@@ -1715,10 +1763,25 @@ function Library:CreateWindow(cfg)
                                         end)
                                 end)
                         end
+                        playSfx = function(kind, pitchMul)
+                                local spec = SPEC[kind]
+                                if spec then playOne(spec, pitchMul) end
+                        end
+                        playSfxDual = function(kind)
+                                local spec = SPEC[kind]
+                                if not spec then return end
+                                playOne(spec, 1)
+                                task.delay(0.09, function() playOne(spec, 1.28) end)
+                        end
+                        stopHum = function()
+                                if humSound and humSound.Parent then
+                                        pcall(function() humSound:Destroy() end)
+                                end
+                                humSound = nil
+                        end
                 end
         end
 
-        -- ------------------------------------------------------------
         -- [v5.0.0] BACKDROP BLUR — opt-in via cfg.BackdropBlur = true.
         -- IMPORTANT, documented honestly: this is a Lighting.BlurEffect —
         -- it blurs the ENTIRE GAME WORLD, not this window. That is a global
@@ -1936,7 +1999,7 @@ function Library:CreateWindow(cfg)
                 prog.Parent = n
 
                 Tween(n, T20, { BackgroundTransparency = 0.05 })
-                playSfx("Notify", 1.2)
+                playSfxDual("Toast") -- [v5.1.0] dual-tone notification chime
                 -- [v4.1.0] Entrance: slide in from the right edge with a soft
                 -- overshoot settle — reads as "arriving" rather than growing.
                 Tween(n, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
@@ -2029,6 +2092,7 @@ function Library:CreateWindow(cfg)
         local function setHidden(h)
                 hidden = h
                 if h then
+                        playSfx("Close") -- [v5.1.0] reverse soft snap (spec)
                         closeCurrentPopup()
                         closeCommandPalette()
                         closeModal()
@@ -2040,6 +2104,7 @@ function Library:CreateWindow(cfg)
                                         { Size = 0 })
                         end
                 else
+                        playSfx("Open") -- [v5.1.0] low sub-bass pop (spec)
                         floatIcon.Visible = false
                         frame.Visible = true
                         setShadowVisible(true)
@@ -2242,22 +2307,22 @@ function Library:CreateWindow(cfg)
                 -- Convert the visible coordinate back into the scrolling
                 -- canvas coordinate so the indicator stays under a tab even
                 -- after the horizontal rail has been scrolled. Y stays fixed:
-                -- the underline always rides the same strip beneath the chips.
+                -- the pillar always rides the same strip beneath the chips.
                 local relX = snapPx((btn.AbsolutePosition.X - tabBar.AbsolutePosition.X) / scale
                         + tabBar.CanvasPosition.X)
-                local goal = UDim2.new(0, relX, 0, TABBAR_H - 5)
-                local goalSize = UDim2.new(0, w, 0, 3)
+                local goal = UDim2.new(0, relX, 0, TABBAR_H - 8)
+                local goalSize = UDim2.new(0, w, 0, 10)
                 if animated and not reducedMotion then
-                        -- [v5.0.0] SPRING: the underline glides with momentum.
+                        -- [v5.0.0] SPRING: the pillar glides with momentum.
                         -- Flicking across tabs retargets mid-flight and the
                         -- velocity carries — interruptible by design.
                         tabIndicatorSpring = springTo(tabIndicatorSpring, tabIndicator, relX, {
                                 stiffness = 320, damping = 26,
                                 apply = function(v)
-                                        tabIndicator.Position = UDim2.new(0, snapPx(v), 0, TABBAR_H - 5)
+                                        tabIndicator.Position = UDim2.new(0, snapPx(v), 0, TABBAR_H - 8)
                                 end,
                         })
-                        Tween(tabIndicator, MT.settle, { Size = goalSize })
+                        Tween(tabIndicator, MT.move, { Size = goalSize })
                 else
                         springCancel(tabIndicatorSpring, false)
                         tabIndicator.Position = goal
@@ -2358,6 +2423,16 @@ function Library:CreateWindow(cfg)
                         textLbl.Size = UDim2.new(1, -38, 1, 0)
                 end
 
+                -- [v5.1.0] Page lives inside a CanvasGroup so tab switches can
+                -- fade the WHOLE panel (group transparency) while it slides
+                -- +8px horizontally — the spec's panel transition.
+                local pageGroup = Instance.new("CanvasGroup")
+                pageGroup.Name = "PageGroup"
+                pageGroup.Size = UDim2.new(1, 0, 1, 0)
+                pageGroup.BackgroundTransparency = 1
+                pageGroup.GroupTransparency = 0
+                pageGroup.Visible = false
+                pageGroup.Parent = content
                 local page = Instance.new("ScrollingFrame")
                 page.Size = UDim2.new(1, 0, 1, 0)
                 page.BackgroundTransparency = 1
@@ -2366,8 +2441,7 @@ function Library:CreateWindow(cfg)
                 page.ScrollBarImageColor3 = C.accent
                 page.ScrollBarImageTransparency = 0.40
                 page.CanvasSize = UDim2.new(0, 0, 0, 0)
-                page.Visible = false
-                page.Parent = content
+                page.Parent = pageGroup
 
                 local pLayout = Instance.new("UIListLayout")
                 pLayout.Padding = UDim.new(0, D.pageGap) -- [v5.0.0] density token
@@ -2379,6 +2453,7 @@ function Library:CreateWindow(cfg)
                 end)
 
                 tab.Page = page
+                tab._pageGroup = pageGroup
                 tab.Btn = btn
                 tab.Name = tabName
 
@@ -2438,6 +2513,7 @@ function Library:CreateWindow(cfg)
                                         if t == prev then prevIndex = i end
                                 end
                                 prev.Page.Visible = false
+                                if prev._pageGroup then prev._pageGroup.Visible = false end
                                 prev.Btn.BackgroundTransparency = 0
                                 Tween(prev.Btn, T20, { BackgroundColor3 = C.tabChip })
                                 Tween(prev._chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
@@ -2446,6 +2522,20 @@ function Library:CreateWindow(cfg)
                         end
                         ActiveTab = tab
                         tab.Page.Visible = true
+                        pageGroup.Visible = true
+                        -- [v5.1.0] PANEL TRANSITION (spec): the incoming content
+                        -- slides in horizontally (+8px offset) with a 0.18s
+                        -- CanvasGroup transparency fade.
+                        if not skipAnim and not reducedMotion then
+                                pageGroup.GroupTransparency = 1
+                                page.Position = UDim2.new(0, 8, 0, 0)
+                                Tween(pageGroup, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                        { GroupTransparency = 0 })
+                                Tween(page, MT.move, { Position = UDim2.new(0, 0, 0, 0) })
+                        else
+                                pageGroup.GroupTransparency = 0
+                                page.Position = UDim2.new(0, 0, 0, 0)
+                        end
                         -- [v4.3.0] ACTIVE TAB = ACCENT FILL: the selected tab is a
                         -- solid accent chip with white bold text — unmistakable,
                         -- exactly as requested. Inactive tabs stay quiet chips.
@@ -2535,7 +2625,7 @@ function Library:CreateWindow(cfg)
                         end
                 end)
                 btn.Activated:Connect(function()
-                        playSfx("Tab", 1.25)
+                        playSfx("Tab")
                         ripple(btn, btn.AbsoluteSize.X / 2, btn.AbsoluteSize.Y / 2, C.accent)
                         setActive(false)
                 end)
@@ -2950,7 +3040,7 @@ function Library:CreateWindow(cfg)
                         -- multiplication surprises.)
 
                         -- [v4.4.0] Ripple mask: owns clipping so ripples respect
-                        -- the rounded rect while the halo escapes it.
+                        -- the rounded rect.
                         local rippleMask = Instance.new("Frame")
                         rippleMask.Name = "RippleMask"
                         rippleMask.Size = UDim2.new(1, 0, 1, 0)
@@ -2960,6 +3050,39 @@ function Library:CreateWindow(cfg)
                         rippleMask.ZIndex = 4
                         rippleMask.Parent = b
                         corner(rippleMask, R.panel)
+
+                        -- [v5.1.0] SHEEN SWEEP (spec): a 20° diagonal light
+                        -- reflection fires across the card face on press.
+                        -- One-shot press feedback (not idle decoration), clipped
+                        -- by the ripple mask so it respects the rounded rect.
+                        local sheen = Instance.new("Frame")
+                        sheen.Name = "PressSheen"
+                        sheen.Size = UDim2.new(0, 46, 1.8, 0)
+                        sheen.AnchorPoint = Vector2.new(0.5, 0.5)
+                        sheen.Position = UDim2.new(-0.35, 0, 0.5, 0)
+                        sheen.Rotation = 20
+                        sheen.BackgroundColor3 = C.white
+                        sheen.BackgroundTransparency = 0.62
+                        sheen.BorderSizePixel = 0
+                        sheen.ZIndex = 5
+                        sheen.Parent = rippleMask
+                        corner(sheen, PILL)
+                        local sheenGrad = Instance.new("UIGradient")
+                        sheenGrad.Transparency = NumberSequence.new({
+                                NumberSequenceKeypoint.new(0.0, 1.0),
+                                NumberSequenceKeypoint.new(0.5, 0.06),
+                                NumberSequenceKeypoint.new(1.0, 1.0),
+                        })
+                        sheenGrad.Parent = sheen
+                        local sheenBusy = false
+                        local function fireSheen()
+                                if sheenBusy or reducedMotion or not sheen.Parent then return end
+                                sheenBusy = true
+                                sheen.Position = UDim2.new(-0.35, 0, 0.5, 0)
+                                Tween(sheen, TweenInfo.new(0.42, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+                                        { Position = UDim2.new(1.3, 0, 0.5, 0) })
+                                task.delay(0.5, function() sheenBusy = false end)
+                        end
 
                         -- [v4.4.0] SIGNATURE SPINE with LIVING GRADIENT: the spine
                         -- now carries a vertical accentHi→accentDim gradient; on
@@ -3049,24 +3172,22 @@ function Library:CreateWindow(cfg)
                                                 { Scale = 1 })
                                 end
                         end)
-                        -- [v4.1.0] Micro press-feedback: a 3% dip on press with a
-                        -- quick Quint return gives buttons a physical, snappy feel
-                        -- without any layout shift (UIScale only).
+                        -- [v5.1.0] SPRING SHRINK (spec): 0.96x on press with the
+                        -- 0.08s Sine micro-feedback curve — immediate tactile
+                        -- response with no script latency. Release rides `move`.
                         b.MouseButton1Down:Connect(function()
-                                Tween(btnPressScale, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                                        { Scale = 0.97 })
+                                Tween(btnPressScale, MT.press, { Scale = 0.96 })
                         end)
                         b.MouseButton1Up:Connect(function()
-                                Tween(btnPressScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-                                        { Scale = 1 })
+                                Tween(btnPressScale, MT.move, { Scale = 1 })
                         end)
                         b.MouseLeave:Connect(function()
-                                Tween(btnPressScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-                                        { Scale = 1 })
+                                Tween(btnPressScale, MT.move, { Scale = 1 })
                         end)
 
                         b.Activated:Connect(function()
-                                playSfx("Click", 1.15)
+                                playSfx("Click") -- [v5.1.0] metallic micro tick (spec pitch 1.0/0.35)
+                                fireSheen()
                                 ripple(rippleMask, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
                                 Tween(b, T20, { BackgroundColor3 = C.accentDim })
                                 Tween(lbl, T20, { TextColor3 = C.white })
@@ -3227,23 +3348,39 @@ function Library:CreateWindow(cfg)
                         hit.Selectable = true
 
                         local obj = { CurrentValue = state }
+                        local bloomTween = nil
                         local function apply(v, silent)
                                 state = v
                                 obj.CurrentValue = v
-                                -- [v4.4.0] SQUISHY SPRING PHYSICS: instead of a plain
-                                -- shrink-settle, the thumb STRETCHES along its travel
-                                -- (22x15 — pulled like taffy) and springs back to
-                                -- 18x18 with a Quart settle when it lands.
-                                Tween(knob, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                                        { Size = UDim2.new(0, 22, 0, 15) })
-                                task.delay(0.16, function()
-                                        if not knob.Parent then return end
-                                        Tween(knob, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-                                                { Size = UDim2.new(0, 18, 0, 18) })
-                                end)
+                                -- [v5.1.0] ELASTIC PILL MORPH (spec): the knob
+                                -- STRETCHES horizontally while translating (taffy
+                                -- pull: 24x16 on the 0.20s Quart component curve)
+                                -- and snaps back to 18x18 with spring dampening
+                                -- (Back overshoot) when it lands.
+                                if not reducedMotion then
+                                        Tween(knob, MT.move, { Size = UDim2.new(0, 24, 0, 16) })
+                                        task.delay(0.18, function()
+                                                if not knob.Parent then return end
+                                                Tween(knob, TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                                        { Size = UDim2.new(0, 18, 0, 18) })
+                                        end)
+                                end
                                 -- Switch background fades smoothly
                                 Tween(sw, TTOGGLEBG, { BackgroundColor3 = state and C.accent or C.track })
-                                Tween(hStroke, T20, { Color = state and C.accentDim or C.border })
+                                -- [v5.1.0] AMBIENT BORDER BLOOM (spec): the active
+                                -- state triggers a one-shot accent bloom on the
+                                -- holder stroke — thicker + bright, then settling
+                                -- to the resting accent. One-shot feedback (the
+                                -- press moment), not an idle loop.
+                                if state then
+                                        if bloomTween then pcall(function() bloomTween:Cancel() end) end
+                                        hStroke.Thickness = 2.2
+                                        hStroke.Color = C.accentHi
+                                        bloomTween = Tween(hStroke, MT.settle,
+                                                { Thickness = 1, Color = C.accentDim })
+                                else
+                                        Tween(hStroke, MT.move, { Color = C.border, Thickness = 1 })
+                                end
                                 -- Knob slides with smooth easing
                                 Tween(knob, TTOGGLE, {
                                         Position = state and UDim2.new(1, -20, 0.5, -9) or UDim2.new(0, 2, 0.5, -9)
@@ -3271,7 +3408,7 @@ function Library:CreateWindow(cfg)
                         function obj:Reset() apply(defaultState) end
 
                         hit.Activated:Connect(function()
-                                playSfx("Toggle", state and 1.0 or 1.4)
+                                playSfx(state and "ToggleOn" or "ToggleOff") -- [v5.1.0] cyber chime ON / dull click OFF
                                 apply(not state)
                         end)
                         onTheme(function()
@@ -3375,6 +3512,59 @@ function Library:CreateWindow(cfg)
                         corner(knob, UDim.new(1, 0))
                         local knobStroke = stroke(knob, C.accent, 2)
                         -- Subtle knob shadow for depth.
+                        -- [v5.1.0] DYNAMIC VALUE TOOLTIP (spec): a floating value
+                        -- chip pops up above the thumb on press with elastic
+                        -- spring physics, shows the live value, and retracts on
+                        -- release. Attached to the track, positioned at the knob.
+                        local valuePop = Instance.new("Frame")
+                        valuePop.Name = "ValuePop"
+                        valuePop.Size = UDim2.new(0, 62, 0, 24)
+                        valuePop.AnchorPoint = Vector2.new(0.5, 1)
+                        valuePop.Position = UDim2.new(0, 0, 0, -8)
+                        valuePop.BackgroundColor3 = C.panelAlt
+                        valuePop.BackgroundTransparency = 1
+                        valuePop.BorderSizePixel = 0
+                        valuePop.ZIndex = 12
+                        valuePop.Visible = false
+                        valuePop.Parent = holder
+                        corner(valuePop, R.small)
+                        stroke(valuePop, C.accentDim, 1)
+                        local valuePopLbl = Instance.new("TextLabel")
+                        valuePopLbl.Size = UDim2.new(1, -6, 1, 0)
+                        valuePopLbl.Position = UDim2.new(0, 3, 0, 0)
+                        valuePopLbl.BackgroundTransparency = 1
+                        valuePopLbl.Font = Enum.Font.Code
+                        valuePopLbl.TextSize = 12
+                        valuePopLbl.TextColor3 = C.accentHi
+                        valuePopLbl.TextXAlignment = Enum.TextXAlignment.Center
+                        valuePopLbl.TextTransparency = 1
+                        valuePopLbl.Text = ""
+                        valuePopLbl.ZIndex = 13
+                        valuePopLbl.Parent = valuePop
+                        local valuePopSpring = nil
+                        local function showValuePop(show)
+                                if show then
+                                        valuePop.Visible = true
+                                        valuePopLbl.Text = tostring(value) .. suffix
+                                        valuePopSpring = springTo(valuePopSpring, valuePop, 1, {
+                                                from = 0, stiffness = 340, damping = 18,
+                                                apply = function(v)
+                                                        valuePop.BackgroundTransparency = 1 - v * 0.95
+                                                        valuePopLbl.TextTransparency = 1 - v
+                                                end,
+                                        })
+                                else
+                                        springCancel(valuePopSpring, true)
+                                        valuePop.Visible = false
+                                end
+                        end
+                        local function trackValuePop()
+                                local pct = math.clamp((value - minVal) / math.max(maxVal - minVal, 1), 0, 1)
+                                local trackW = track.AbsoluteSize.X
+                                valuePop.Position = UDim2.new(0, snapPx(14 + pct * math.max(trackW - 28, 1)), 0, -8)
+                                valuePopLbl.Text = tostring(value) .. suffix
+                        end
+
                         local knobShadow = Instance.new("ImageLabel")
                         knobShadow.Size = UDim2.new(1, 8, 1, 8)
                         knobShadow.Position = UDim2.new(0, -4, 0, -4)
@@ -3385,6 +3575,7 @@ function Library:CreateWindow(cfg)
                         knobShadow.ZIndex = 2
                         knobShadow.Parent = knob
 
+                        local lastTicked = nil
                         local function update(animated)
                                 local pct = math.clamp((value - minVal) / (maxVal - minVal), 0, 1)
                                 if animated then
@@ -3395,6 +3586,13 @@ function Library:CreateWindow(cfg)
                                         knob.Position = UDim2.new(pct, 0, 0.5, 0)
                                 end
                                 valLbl.Text = tostring(value) .. suffix
+                                -- [v5.1.0] live popup tracking + soft friction tick
+                                -- (spec 1.3/0.15) each time the snapped value steps.
+                                if valuePop.Visible then trackValuePop() end
+                                if value ~= lastTicked then
+                                        lastTicked = value
+                                        if valuePop.Visible then playSfx("SliderStep") end
+                                end
                         end
                         update(false)
 
@@ -3477,6 +3675,9 @@ function Library:CreateWindow(cfg)
                                                 local grabbedKnob = layoutReady and math.abs(gripOffsetX) <= 14
                                                 -- The knob grows slightly while it is grabbed.
                                                 Tween(knob, T20, { Size = UDim2.new(0, 22, 0, 22) })
+                                                -- [v5.1.0] value popup springs in on press.
+                                                showValuePop(true)
+                                                trackValuePop()
                                                 if layoutReady then
                                                         setFromX(grabbedKnob and (inp.Position.X - gripOffsetX) or inp.Position.X)
                                                         fireCallback()
@@ -3487,6 +3688,7 @@ function Library:CreateWindow(cfg)
                                                 end, function()
                                                         -- Knob shrinks back on release
                                                         Tween(knob, T20, { Size = UDim2.new(0, 18, 0, 18) })
+                                                        showValuePop(false)
                                                         fireCallback()
                                                 end)
                                         end
@@ -3546,13 +3748,44 @@ function Library:CreateWindow(cfg)
                         box.Parent = holder
 
                         local obj = { CurrentValue = box.Text }
+                        -- [v5.1.0] NEON FOCUS FLARE (spec): the stroke thickness
+                        -- expands on focus; the placeholder shifts upward into a
+                        -- floating mini-label above the field.
+                        local floatLbl = Instance.new("TextLabel")
+                        floatLbl.Name = "FloatLabel"
+                        floatLbl.Size = UDim2.new(1, -28, 0, 12)
+                        floatLbl.Position = UDim2.new(0, 14, 0, -13)
+                        floatLbl.BackgroundTransparency = 1
+                        floatLbl.Font = Enum.Font.GothamBold
+                        floatLbl.TextSize = 9
+                        floatLbl.TextColor3 = C.accent
+                        floatLbl.TextXAlignment = Enum.TextXAlignment.Left
+                        floatLbl.Text = string.upper(nameText)
+                        floatLbl.TextTransparency = 0.65
+                        floatLbl.Position = UDim2.new(0, 14, 0, 2)
+                        floatLbl.ZIndex = 3
+                        floatLbl.Parent = holder
                         box.Focused:Connect(function()
-                                Tween(strk, T10, { Color = C.accent, Thickness = 1.5 })
+                                -- [v5.1.0] flare: stroke 1 -> 2 while focused
+                                Tween(strk, MT.move, { Color = C.accent, Thickness = 2 })
                                 Tween(lbl, T10, { TextColor3 = C.accent })
+                                -- placeholder floats up into the mini-label
+                                Tween(floatLbl, MT.move, {
+                                        Position = UDim2.new(0, 14, 0, -13),
+                                        TextTransparency = 0,
+                                })
                         end)
                         box.FocusLost:Connect(function()
-                                Tween(strk, T10, { Color = C.border, Thickness = 1 })
+                                Tween(strk, MT.move, { Color = C.border, Thickness = 1 })
                                 Tween(lbl, T10, { TextColor3 = C.muted })
+                                -- mini-label retracts when the field has content;
+                                -- settles back over the field when empty
+                                if box.Text == "" then
+                                        Tween(floatLbl, MT.move, {
+                                                Position = UDim2.new(0, 14, 0, 2),
+                                                TextTransparency = 0.65,
+                                        })
+                                end
                                 obj.CurrentValue = box.Text
                                 if callback then pcall(callback, box.Text) end
                                 if icfg.RemoveTextAfterFocusLost then
@@ -3773,9 +4006,19 @@ function Library:CreateWindow(cfg)
                                 )
                                 local maxHeight = math.max(1, viewport.Y - margin * 2)
 
+                                -- [v5.1.0] 3D CARD UNFOLD (spec): the list renders inside
+                                -- a CanvasGroup so the whole popup can alpha-unfold, and
+                                -- every option row drops in on a 0.02s stagger.
+                                local listGroup = Instance.new("CanvasGroup")
+                                listGroup.Name = "DropdownPopupGroup"
+                                listGroup.Size = UDim2.fromOffset(px(width), 0)
+                                listGroup.BackgroundTransparency = 1
+                                listGroup.GroupTransparency = 1
+                                listGroup.ZIndex = 61
+                                listGroup.Parent = overlayGui
                                 local list = Instance.new("ScrollingFrame")
                                 list.Name = "DropdownPopup"
-                                list.Size = UDim2.fromOffset(px(width), 0)
+                                list.Size = UDim2.new(1, 0, 1, 0)
                                 list.BackgroundColor3 = C.panel
                                 list.BackgroundTransparency = 0.03
                                 list.BorderSizePixel = 0
@@ -3785,8 +4028,8 @@ function Library:CreateWindow(cfg)
                                 list.ScrollBarThickness = px(3)
                                 list.ScrollBarImageColor3 = C.accent
                                 list.CanvasSize = UDim2.fromOffset(0, 0)
-                                list.ZIndex = 61
-                                list.Parent = overlayGui
+                                list.ZIndex = 62
+                                list.Parent = listGroup
                                 corner(list, R.panel)
                                 stroke(list, C.border, 1)
 
@@ -3937,10 +4180,10 @@ function Library:CreateWindow(cfg)
                                                 px(12 + searchHeight + canvasRows * rowHeight
                                                         + math.max(0, canvasRows - 1) * rowGap)
                                         )
-                                        if list.AbsoluteSize.Y <= 1 then
-                                                list.Position = UDim2.fromOffset(px(x), px(collapsedY))
+                                        if listGroup.AbsoluteSize.Y <= 1 then
+                                                listGroup.Position = UDim2.fromOffset(px(x), px(collapsedY))
                                         end
-                                        Tween(list, T15, {
+                                        Tween(listGroup, T15, {
                                                 Size = UDim2.fromOffset(px(width), px(height)),
                                                 Position = UDim2.fromOffset(px(x), px(y)),
                                         })
@@ -3986,7 +4229,7 @@ function Library:CreateWindow(cfg)
 
                                 local popupJanitor = Janitor.new()
                                 popupJanitor:Add(catcher, "Destroy")
-                                popupJanitor:Add(list, "Destroy")
+                                popupJanitor:Add(listGroup, "Destroy")
                                 popupJanitor:Add(function()
                                         popupOpen = false
                                         arrow.Text = "▾"
@@ -4008,6 +4251,28 @@ function Library:CreateWindow(cfg)
                                 end
                                 currentPopupJanitor = popupJanitor
                                 applyFilter()
+
+                                -- [v5.1.0] UNFOLD: group alpha 1 -> 0 over 0.15s while
+                                -- each option row drops 10px with a 0.02s stagger —
+                                -- the spec's cascading dropdown fill.
+                                do
+                                        local rows = {}
+                                        for _, view in ipairs(views) do
+                                                if view.Frame.Visible then table.insert(rows, view.Frame) end
+                                        end
+                                        for rowIndex, row in ipairs(rows) do
+                                                local origPos = row.Position
+                                                row.Position = UDim2.new(origPos.X.Scale, origPos.X.Offset,
+                                                        origPos.Y.Scale, origPos.Y.Offset + 10)
+                                                row.BackgroundTransparency = 1
+                                                task.delay((rowIndex - 1) * 0.02, function()
+                                                        if not row.Parent then return end
+                                                        Tween(row, MT.move, { Position = origPos, BackgroundTransparency = 0 })
+                                                end)
+                                        end
+                                        Tween(listGroup, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                                { GroupTransparency = 0 })
+                                end
 
                                 if searchBox then
                                         task.defer(function()
@@ -4126,17 +4391,40 @@ function Library:CreateWindow(cfg)
                         keyLbl.Text = keyName(bound)
                         keyLbl.Parent = pill
 
+                        -- [v5.1.0] PULSE RING (spec): a breathing neon ring around
+                        -- the pill while listening for a key, plus a low-frequency
+                        -- hum (opt-in sounds) until capture. Snap-confirm chime on
+                        -- a successful rebind.
+                        local pulseRing = Instance.new("Frame")
+                        pulseRing.Name = "ListenPulseRing"
+                        pulseRing.Size = UDim2.new(1, 10, 1, 10)
+                        pulseRing.AnchorPoint = Vector2.new(0.5, 0.5)
+                        pulseRing.Position = UDim2.new(0.5, 0, 0.5, 0)
+                        pulseRing.BackgroundColor3 = C.accent
+                        pulseRing.BackgroundTransparency = 1
+                        pulseRing.BorderSizePixel = 0
+                        pulseRing.ZIndex = 1
+                        pulseRing.Visible = false
+                        pulseRing.Parent = pill
+                        corner(pulseRing, PILL)
+
                         local obj = { CurrentKeybind = bound }
 
                                 local rebindCatcher = nil  -- set when rebind mode starts
 
+                                local pulseLoopToken = 0
                                 local function stopListening(newKey)
                                         listening = false
                                         anyKeybindListening = false
+                                        pulseLoopToken = pulseLoopToken + 1 -- kills the breathing loop
+                                        stopHum()
+                                        pulseRing.Visible = false
                                         if rebindCatcher then rebindCatcher:Destroy() rebindCatcher = nil end
                                 if newKey ~= nil then
                                         bound = newKey
                                         obj.CurrentKeybind = bound
+                                        -- [v5.1.0] snap confirmation
+                                        playSfx("Confirm")
                                         if changedCallback then
                                                 local ok, err = pcall(changedCallback, bound, obj)
                                                 if not ok then warn("[RezurXLib] Keybind change callback failed:", err) end
@@ -4168,6 +4456,22 @@ function Library:CreateWindow(cfg)
                                 keyLbl.Text = "..."
                                 Tween(pill, T15, { BackgroundColor3 = C.panelHov })
                                 Tween(pillStroke, T15, { Color = C.accent, Thickness = 1.5 })
+                                -- [v5.1.0] breathing ring + low hum while listening
+                                pulseRing.Visible = true
+                                playSfx("Hum")
+                                local myToken = pulseLoopToken + 1
+                                pulseLoopToken = myToken
+                                task.spawn(function()
+                                        while listening and pulseLoopToken == myToken and pulseRing.Parent do
+                                                Tween(pulseRing, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                        { BackgroundTransparency = 0.82 })
+                                                task.wait(0.6)
+                                                if not (listening and pulseLoopToken == myToken) then break end
+                                                Tween(pulseRing, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                        { BackgroundTransparency = 1 })
+                                                task.wait(0.6)
+                                        end
+                                end)
                                 -- Catcher: clicking outside the pill cancels rebind
                                 rebindCatcher = Instance.new("TextButton")
                                 rebindCatcher.Size = UDim2.new(1, 0, 1, 0)
@@ -4432,7 +4736,11 @@ function Library:CreateWindow(cfg)
                                 stroke(hueKnob, C.black, 1.5)
 
                                 -- Hex display
-                                local hexLbl = Instance.new("TextLabel")
+                                -- [v5.1.0] GLASS RADIAL EXPANDER hex copier: the hex
+                                -- chip is click-to-copy (executor setclipboard when
+                                -- present) with a snap-confirm toast.
+                                local hexLbl = Instance.new("TextButton")
+                                hexLbl.Name = "HexCopy"
                                 hexLbl.Size = UDim2.new(0, 120, 0, 20)
                                 hexLbl.Position = UDim2.new(0, 14, 0, 225)
                                 hexLbl.BackgroundTransparency = 1
@@ -4440,8 +4748,19 @@ function Library:CreateWindow(cfg)
                                 hexLbl.TextSize = 12
                                 hexLbl.TextColor3 = C.muted
                                 hexLbl.TextXAlignment = Enum.TextXAlignment.Left
+                                hexLbl.AutoButtonColor = false
                                 hexLbl.ZIndex = 9
                                 hexLbl.Parent = panel
+                                hexLbl.Activated:Connect(function()
+                                        local hexText = hexLbl.Text
+                                        local copied = false
+                                        if type(setclipboard) == "function" then
+                                                copied = pcall(setclipboard, hexText)
+                                        end
+                                        playSfx("Confirm")
+                                        notify("Color Picker", copied and ("Copied " .. hexText .. " to clipboard.")
+                                                or (hexText .. " (clipboard unavailable)"), 3, "success")
+                                end)
 
                                 -- Done button
                                 local doneBtn = Instance.new("TextButton")
@@ -5785,7 +6104,8 @@ function Library:CreateWindow(cfg)
                         end
 
                         WindowJanitor:Add(box.Focused:Connect(function()
-                                if not obj.Disabled then Tween(inputStroke, T10, { Color = C.accent }) end
+                                -- [v5.1.0] neon focus flare
+                                if not obj.Disabled then Tween(inputStroke, MT.move, { Color = C.accent, Thickness = 2 }) end
                         end))
                         WindowJanitor:Add(box.FocusLost:Connect(function()
                                 if obj.Disabled then return end
@@ -7349,7 +7669,61 @@ function Library:CreateWindow(cfg)
                                         local keyFile = "RezurXLib/Keys/" .. tostring(ks.FileName or "Key") .. ".rezx"
                                         FS.write(keyFile, matchedKey)
                                 end
+                                -- [v5.1.0] STEP UNLOCK SEQUENCE (spec): verification
+                                -- steps light up with glowing checkmarks one by one,
+                                -- a progress ring fills, THEN the window explosively
+                                -- expands (the v5 Size-spring entrance + Trace lap).
                                 task.spawn(function()
+                                        pcall(function()
+                                                local steps = { "CHECKING FORMAT", "VERIFYING KEY", "AUTHORIZED" }
+                                                -- Build the step rows into the card.
+                                                local stepFrames = {}
+                                                for stepIndex, stepText in ipairs(steps) do
+                                                        local row = Instance.new("Frame")
+                                                        row.Name = "Step" .. stepIndex
+                                                        row.Size = UDim2.new(1, -48, 0, 16)
+                                                        row.Position = UDim2.new(0, 24, 0, 164 + (stepIndex - 1) * 18)
+                                                        row.BackgroundTransparency = 1
+                                                        row.ZIndex = 34
+                                                        row.Parent = card
+                                                        local chk = Instance.new("TextLabel")
+                                                        chk.Size = UDim2.new(0, 16, 1, 0)
+                                                        chk.BackgroundTransparency = 1
+                                                        chk.Font = Enum.Font.GothamBold
+                                                        chk.TextSize = 12
+                                                        chk.TextColor3 = C.accent
+                                                        chk.TextTransparency = 1
+                                                        chk.Text = "✓"
+                                                        chk.ZIndex = 35
+                                                        chk.Parent = row
+                                                        local st = Instance.new("TextLabel")
+                                                        st.Size = UDim2.new(1, -22, 1, 0)
+                                                        st.Position = UDim2.new(0, 20, 0, 0)
+                                                        st.BackgroundTransparency = 1
+                                                        st.Font = Enum.Font.GothamMedium
+                                                        st.TextSize = 10
+                                                        st.TextColor3 = C.textDim
+                                                        st.TextXAlignment = Enum.TextXAlignment.Left
+                                                        st.TextTransparency = 0.35
+                                                        st.Text = stepText
+                                                        st.ZIndex = 35
+                                                        st.Parent = row
+                                                        table.insert(stepFrames, { chk = chk, st = st })
+                                                end
+                                                -- Hide the old status text; steps take over.
+                                                status.TextTransparency = 1
+                                                -- Sequential glow-in with a soft tick per step.
+                                                for stepIndex, frameRow in ipairs(stepFrames) do
+                                                        task.wait(0.14)
+                                                        if not card.Parent then return end
+                                                        frameRow.chk.TextTransparency = 0
+                                                        frameRow.st.TextTransparency = 0
+                                                        Tween(frameRow.chk, MT.move, { TextTransparency = 0 })
+                                                        Tween(frameRow.st, MT.move, { TextTransparency = 0 })
+                                                        playSfx("Confirm", 1 + stepIndex * 0.12)
+                                                end
+                                                task.wait(0.18)
+                                        end)
                                         pcall(function()
                                                 Tween(card, T20, { BackgroundTransparency = 1 })
                                                 Tween(cardStroke, T20, { Transparency = 1 })

@@ -50,29 +50,36 @@ local playerGui = player and player:WaitForChild("PlayerGui")
 -- ============================================================
 -- TWEEN PRESETS
 -- ============================================================
--- MOTION TOKENS (v5.0.0) — exactly four named curves. Every
--- animation in the library resolves to one of these; no ad-hoc
--- durations. The legacy T-constants alias the tokens so existing
--- call sites collapse onto the system without churn.
+-- MOTION TOKENS (v5.1.0) — the standardized curve profiles from the
+-- Kinetic spec. Every animation resolves to one of these; no ad-hoc
+-- durations. Legacy T-constants alias the tokens so existing call sites
+-- collapse onto the system without churn.
+--   press : 0.08s Sine InOut  — micro tactile feedback, zero latency feel
+--   move  : 0.20s Quart Out   — component motion (sliders, toggles, tabs)
+--   enter : 0.32s Back Out    — entrances/popups with intentional overshoot
+--   settle: 0.24s Quint Out   — general state transitions
+--   snap  : 0.12s Quad Out    — hover feedback
 -- ============================================================
 local MT = {
         instant = nil, -- no tween: write the end state directly
-        snap    = TweenInfo.new(0.12, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out), -- hover / press feedback
-        settle  = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), -- state transitions
-        enter   = TweenInfo.new(0.42, Enum.EasingStyle.Back,  Enum.EasingDirection.Out), -- entrances / arrivals
+        press   = TweenInfo.new(0.08, Enum.EasingStyle.Sine,  Enum.EasingDirection.InOut), -- micro press feedback
+        move    = TweenInfo.new(0.20, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),  -- component motion
+        settle  = TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),  -- state transitions
+        enter   = TweenInfo.new(0.32, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),  -- entrances (spec)
+        snap    = TweenInfo.new(0.12, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),  -- hover feedback
 }
-local T10    = MT.snap    -- hover/press
+local T10    = MT.snap
 local T15    = MT.snap
-local T20    = MT.settle  -- state changes
+local T20    = MT.settle
 local T30    = MT.settle
-local T40    = MT.settle  -- fades (opacity reads fine on settle)
+local T40    = MT.settle
 local T50    = MT.enter
 local T60    = MT.settle
-local TMIN   = MT.settle  -- minimize/expand
-local TTAB   = MT.enter   -- tab arrival
-local TPRESS = MT.snap
+local TMIN   = MT.settle
+local TTAB   = MT.move    -- [v5.1.0] tab motion rides the component curve
+local TPRESS = MT.press
 local TPOP   = MT.enter
-local TTOGGLE   = MT.settle
+local TTOGGLE   = MT.move -- [v5.1.0] toggle travel on the component curve
 local TTOGGLEBG = MT.settle
 
 -- ============================================================

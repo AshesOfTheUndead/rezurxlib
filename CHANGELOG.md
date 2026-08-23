@@ -1,5 +1,69 @@
 # Changelog
 
+## v5.1.0 "Kinetic" — The Micro-Interaction Blueprint, Implemented
+
+The full component-upgrade blueprint, built: every table row, the motion
+physics spec, the hardware drag physics, and the tactile sound map — all
+running on the v5 motion engine (springs + tokens), all tested. 195/195.
+
+### Motion physics spec (implemented as tokens)
+- **press** 0.08s Sine InOut — micro tactile feedback, zero latency feel
+- **move** 0.20s Quart Out — component motion (sliders, toggles, tabs)
+- **enter** 0.32s Back Out — entrances with intentional overshoot
+- Legacy constants alias the tokens; no ad-hoc curves anywhere.
+
+### Component upgrades (every row of the blueprint)
+- **Buttons — Spring Shrink & Sheen Sweep**: 0.96x press on the press
+  curve, a 20° diagonal light reflection fires across the card face
+  (clipped to the rounded rect), metallic micro-tick audio.
+- **Toggles — Elastic Pill Morph**: the knob stretches horizontally
+  during translation (24x16 taffy pull) and snaps back to 18x18 with a
+  Back overshoot; the active state fires a one-shot accent border bloom.
+- **Tabs — Gliding Glass Pillar**: the indicator is now a glowing glass
+  bar (4px core + soft aura, one spring, interruptible). Content panels
+  slide in horizontally (+8px) with a 0.18s CanvasGroup fade.
+- **Sliders — Dynamic Value Tooltip**: a floating value chip springs up
+  above the thumb on press (spring physics), tracks live while dragging
+  with a soft friction tick per snapped step, retracts on release.
+- **Dropdowns — 3D Card Unfold**: the popup renders in a CanvasGroup that
+  alpha-unfolds (0.15s) while option rows drop 10px on a 0.02s stagger —
+  the cascading fill.
+- **Keybinds — Pulse Ring Listener**: a breathing neon ring around the
+  pill while listening + a low-frequency hum (opt-in sounds); key capture
+  ends with a snap-confirmation chime.
+- **Color Pickers — Hex Copier**: the hex chip is click-to-copy (executor
+  setclipboard when present) with a confirmation toast.
+- **Text Inputs — Neon Focus Flare**: the stroke thickness expands on
+  focus while the placeholder floats upward into a mini-label above the
+  field; it retracts when the field empties.
+- **Notifications — dual-tone chime** on arrival (countdown bar, bounce
+  entrance, and stack push-up were already in place).
+- **Key System — Step Unlock**: correct keys run a verification sequence
+  (CHECKING FORMAT → VERIFYING KEY → AUTHORIZED) with glowing checkmarks
+  lighting in one by one, then the explosive window expand + Trace lap.
+
+### Hardware drag physics
+- The window **tilts with its movement vector** while dragging — rotation
+  = clamp(deltaX-influenced tilt, −3°, +3°) — and settles back to level
+  with a Back ease on release. Physical weight, zero frame loops
+  (InputBegan/InputChanged/InputEnded only, as spec'd).
+
+### Tactile sound map (opt-in `Sounds = true`)
+- Full spec table: open 1.0/0.40, close 0.9/0.30, tab 1.2/0.25,
+  toggleOn 1.15/0.30, toggleOff 0.85/0.30, click 1.0/0.35,
+  sliderStep 1.3/0.15, toast 1.0/0.40 (dual-tone), confirm 1.3/0.30,
+  hum 0.55/0.12 (looped while a keybind listens). One engine-local
+  ping, pitched per action; per-action asset overrides supported.
+
+### Verified
+- 27 new checks: sheen sweep geometry + sweep-on-click, toggle
+  stretch/snap/bloom, PageGroup slide-fade lifecycle, slider popup
+  spring-in/live-tracking/retract, dropdown group unfold + row render,
+  keybind pulse ring show/hide on capture, input floating label up/down,
+  drag tilt + settle. **195/195 passing.**
+
+---
+
 ## v5.0.0 "Trace" — Geometry, One Motion, Subtraction
 
 This release stops adding effects and fixes the foundation. Answering the

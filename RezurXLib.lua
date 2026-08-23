@@ -1,12 +1,20 @@
 -- ============================================================
--- RezurXLib v3.2 - self-contained Roblox UI library
+-- RezurXLib v4.0 "Aurora" - self-contained Roblox UI library
+--
+-- Glass + Glow edition: layered depth shadows, frosted surfaces,
+-- animated gradient header, cursor glow, staggered entrances,
+-- icon support, an optional key gate, and signature-diffed
+-- auto-saving configuration files.
 --
 -- Original implementation with tokenized themes, pointer-owned input,
 -- popup ownership, callback isolation, and no package dependency.
 --
--- Trust boundary: no remote loader, telemetry, HTTP request, obfuscation,
--- executor-global call, or automatic file access. Callbacks are supplied by
--- the host game and should target server-validated RemoteEvents where needed.
+-- Trust boundary: no remote loader, telemetry, obfuscation,
+-- executor-global call, or automatic file access. The only network and
+-- file operations are the ones a developer explicitly configures
+-- (KeySettings.GrabKeyFromSite / ConfigurationSaving). Callbacks are
+-- supplied by the host game and should target server-validated
+-- RemoteEvents where needed.
 --
 -- USAGE (ModuleScript):
 --   local Lib = require(path.to.RezurXLib)
@@ -17,6 +25,8 @@
 --       LoadingEnabled  = true,
 --       Theme           = "Quiet",             -- see Library:GetThemeNames()
 --       ToggleUIKeybind = Enum.KeyCode.K,
+--       Icon            = 4483362458,          -- number asset id / uri / emoji
+--       ConfigurationSaving = { Enabled = true, FileName = "Admin" },
 --   })
 --   local Tab = Window:CreateTab("Main", "M")
 --   Tab:CreateButton({ Name = "Refresh", Callback = function() end })
@@ -572,6 +582,10 @@ end
 local function showTooltip(text, anchorGui, host, palette)
         if not text or text == "" then return end
         if not initTooltip(host, palette) then return end
+        -- [FIX v4.0] A destroyed owner (window or overlayGui removed) can leave
+        -- initTooltip true while the frame is parented nowhere; writing into a
+        -- detached frame renders nothing but also errors on some renderers.
+        if not tooltipFrame.Parent then return end
         local activePalette = palette or C
         tooltipText.Text = text
         tooltipFrame.Visible = true
@@ -583,7 +597,21 @@ local function showTooltip(text, anchorGui, host, palette)
         if anchorGui and anchorGui.AbsolutePosition then
                 local pos = anchorGui.AbsolutePosition
                 local size = anchorGui.AbsoluteSize
-                tooltipFrame.Position = UDim2.new(0, pos.X, 0, pos.Y + size.Y + 4)
+                local tipW = txtSize.X + 14
+                local tipH = 26
+                local x = pos.X
+                local y = pos.Y + size.Y + 4
+                -- [FIX v4.0] Viewport clamping: tooltips anchored near the right
+                -- or bottom edge (most elements on a phone) used to render
+                -- fully off-screen. Flip above the anchor and clamp horizontally.
+                local cam = workspace.CurrentCamera
+                local vp = cam and cam.ViewportSize or Vector2.new(1920, 1080)
+                if x + tipW > vp.X - 8 then x = math.max(8, vp.X - 8 - tipW) end
+                if y + tipH > vp.Y - 8 then
+                        y = pos.Y - tipH - 4
+                        if y < 8 then y = math.max(8, vp.Y - 8 - tipH) end
+                end
+                tooltipFrame.Position = UDim2.new(0, x, 0, y)
         end
 end
 
@@ -591,9 +619,48 @@ local function hideTooltip()
         if tooltipFrame then tooltipFrame.Visible = false end
 end
 
+-- ============================================================
+-- [v4.0] OPTIONAL EXECUTOR FILESYSTEM — used ONLY when a developer
+-- explicitly enables ConfigurationSaving or the KeySystem. The library
+-- performs zero automatic file or network operations. Every call is
+-- pcall-guarded so non-executor environments (Studio, regular games)
+-- degrade gracefully to in-memory behavior.
+-- ============================================================
+local FS = {}
+do
+        local function callSafely(fn, ...)
+                if type(fn) ~= "function" then return false, nil end
+                local ok, result = pcall(fn, ...)
+                if ok then return true, result end
+                return false, nil
+        end
+        FS.available = type(writefile) == "function"
+                and type(readfile) == "function"
+                and type(isfile) == "function"
+        function FS.ensureFolder(path)
+                if type(isfolder) == "function" then
+                        local ok, exists = callSafely(isfolder, path)
+                        if ok and exists == true then return end
+                end
+                if type(makefolder) == "function" then
+                        callSafely(makefolder, path)
+                end
+        end
+        function FS.write(path, content)
+                local ok = callSafely(writefile, path, content)
+                return ok
+        end
+        function FS.read(path)
+                return callSafely(readfile, path)
+        end
+        function FS.exists(path)
+                return callSafely(isfile, path) == true
+        end
+end
+
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "3.2.0"
+Library.Version = "4.0.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -649,7 +716,18 @@ function Library:CreateWindow(cfg)
         local C = {}
         for key, value in pairs(Themes.Quiet) do C[key] = value end
         local initialTheme = (type(cfg.Theme) == "table") and cfg.Theme or Themes[cfg.Theme]
-        local activeThemeName = type(cfg.Theme) == "string" and cfg.Theme or "Quiet"
+        -- [FIX v4.0] An unknown string theme used to keep the Quiet palette but
+        -- record the bogus name, so GetThemeName() lied and the settings-panel
+        -- theme dropdown showed a phantom selection. Unknown names now warn and
+        -- fall back to the palette actually in use.
+        local activeThemeName = "Quiet"
+        if type(cfg.Theme) == "string" then
+                if Themes[cfg.Theme] then
+                        activeThemeName = cfg.Theme
+                elseif cfg.Theme ~= "" then
+                        warn("[RezurXLib] Unknown theme '" .. cfg.Theme .. "' — using 'Quiet'. Valid: " .. table.concat(Library:GetThemeNames(), ", "))
+                end
+        end
         if initialTheme then
                 for key, value in pairs(initialTheme) do
                         if ThemeTokenSet[key] and typeof(value) == "Color3" then C[key] = value end
@@ -665,11 +743,69 @@ function Library:CreateWindow(cfg)
         local resizable = cfg.Resizable ~= false
         local accessibility = type(cfg.Accessibility) == "table" and cfg.Accessibility or {}
         local reducedMotion = cfg.ReducedMotion == true or accessibility.ReducedMotion == true or Library.Options.ReducedMotion == true
-        local animatedAccents = cfg.AnimatedAccents == true and not reducedMotion
+        -- [v4.0] Animated accents now default ON (opt-out with AnimatedAccents = false).
+        -- They are the heartbeat of the Glass + Glow look and are all gated on
+        -- reducedMotion for accessibility.
+        local animatedAccents = cfg.AnimatedAccents ~= false and not reducedMotion
         local motionScale = math.clamp(tonumber(cfg.MotionScale) or 1, 0.05, 3)
         local guiHost, hostInfo = resolveGuiHost(cfg)
         if not guiHost then
                 error("[RezurXLib] Unable to find a supported GUI host (PlayerGui or approved CoreGui).", 2)
+        end
+
+        -- ------------------------------------------------------------
+        -- [v4.0] KEY GATE PRE-CHECK — resolved BEFORE any visuals exist so
+        -- the entrance animation can be deferred until the gate is passed.
+        -- Pure logic + explicitly-opted-in file/HTTP reads; nothing runs
+        -- unless the developer sets KeySystem = true.
+        -- ------------------------------------------------------------
+        local keyGatePending = false
+        local keyGateKeys = nil
+        local keySettingsRef = nil
+        do
+                if cfg.KeySystem == true then
+                        local ks = type(cfg.KeySettings) == "table" and cfg.KeySettings or {}
+                        local keys = {}
+                        if type(ks.Key) == "string" and ks.Key ~= "" then
+                                keys = { ks.Key }
+                        elseif type(ks.Key) == "table" then
+                                for _, k in ipairs(ks.Key) do
+                                        if type(k) == "string" and k ~= "" then table.insert(keys, k) end
+                                end
+                        end
+                        -- GrabKeyFromSite: fetch RAW key pages over HTTP (executor
+                        -- HttpGet). Explicit opt-in — the library itself never
+                        -- performs network operations otherwise.
+                        if ks.GrabKeyFromSite == true then
+                                for i, k in ipairs(keys) do
+                                        if string.sub(k, 1, 8) == "https://" or string.sub(k, 1, 7) == "http://" then
+                                                local ok, body = pcall(function() return game:HttpGet(k) end)
+                                                if ok and type(body) == "string" and body ~= "" then
+                                                        keys[i] = string.gsub(body, "[%c%s]", "")
+                                                else
+                                                        warn("[RezurXLib] KeySystem: GrabKeyFromSite failed for '" .. tostring(k) .. "'")
+                                                end
+                                        end
+                                end
+                        end
+                        if #keys == 0 then
+                                warn("[RezurXLib] KeySystem enabled but KeySettings.Key is empty — gate disabled")
+                        else
+                                keyGateKeys = keys
+                                keySettingsRef = ks
+                                local keyFile = "RezurXLib/Keys/" .. tostring(ks.FileName or "Key") .. ".rezx"
+                                local passed = false
+                                if ks.SaveKey ~= false and FS.available and FS.exists(keyFile) then
+                                        local ok, saved = FS.read(keyFile)
+                                        if ok and type(saved) == "string" then
+                                                for _, k in ipairs(keys) do
+                                                        if saved == k then passed = true break end
+                                                end
+                                        end
+                                end
+                                keyGatePending = not passed
+                        end
+                end
         end
 
         -- ------------------------------------------------------------
@@ -682,6 +818,23 @@ function Library:CreateWindow(cfg)
         if panelId == "" then panelId = "Panel" end
         local PANEL_NAME = "RezurX_" .. panelId
         if cfg.ReplaceExisting ~= false then
+                -- [FIX v4.0] Destroying only the previous ScreenGui instance left the
+                -- old Window's UserInputService connections alive: keybinds fired
+                -- twice, the FPS heartbeat kept writing to a dead label, and a
+                -- mid-flight drag session kept erroring against destroyed widgets
+                -- (the classic "ghost callback / stuck drag" report). Destroy the
+                -- Window OBJECT itself so its Janitor runs and it deregisters.
+                for i = #Library._windows, 1, -1 do
+                        local w = Library._windows[i]
+                        local okGui, wGui = pcall(function()
+                                return type(w.GetGui) == "function" and w:GetGui()
+                        end)
+                        if okGui and wGui and wGui.Name == PANEL_NAME then
+                                pcall(function() w:Destroy() end)
+                        end
+                end
+                -- Belt and braces: remove any leftover instance (e.g. from a
+                -- crashed prior run that never registered a Window object).
                 local ok, existing = pcall(function() return guiHost:FindFirstChild(PANEL_NAME) end)
                 if ok and existing then existing:Destroy() end
         end
@@ -689,16 +842,42 @@ function Library:CreateWindow(cfg)
         local Window = {}
         Window.Name = windowName
         Window.Host = hostInfo
+        -- [v4.0] Per-window flag registry: keeps each window's auto-saved
+        -- configuration isolated even when several windows coexist.
+        Window.Flags = {}
         local WindowJanitor = Janitor.new()
 
         -- Theme refreshers: each stateful element registers a closure
         -- that re-applies its colors from `C` for its current state.
         -- Gradients can't be tweened, so they're updated directly.
+        -- [FIX v4.0] onTheme now returns an unregister handle so elements
+        -- can prune their refresher on Destroy. Without pruning, every
+        -- destroyed element kept its whole GUI subtree referenced and its
+        -- refresher kept re-rendering dead widgets on each theme change.
         local ThemeRefreshers = {}
         local function onTheme(fn)
                 table.insert(ThemeRefreshers, fn)
-                return fn
+                local removed = false
+                return fn, function()
+                        if removed then return end
+                        removed = true
+                        for i = #ThemeRefreshers, 1, -1 do
+                                if ThemeRefreshers[i] == fn then
+                                        table.remove(ThemeRefreshers, i)
+                                        break
+                                end
+                        end
+                end
         end
+
+        -- ------------------------------------------------------------
+        -- [FIX v4.0] `minimized` is declared here, BEFORE the resize handler
+        -- further down. It used to be declared 200+ lines later, so the
+        -- resize closure read it as a GLOBAL (always nil under non-strict
+        -- Luau) — a resize started before minimizing fought the minimize
+        -- tween, and any stray global named `minimized` could hijack resize.
+        -- ------------------------------------------------------------
+        local minimized = false
 
         -- ------------------------------------------------------------
         -- SHARED DRAG ROUTER — one global InputChanged/InputEnded pair
@@ -722,6 +901,7 @@ function Library:CreateWindow(cfg)
                         inputType = sourceInput.UserInputType,
                         move = moveFn,
                         onEnd = onEndFn,
+                        born = os.clock(),
                 }
         end
         WindowJanitor:Add(UserInputService.InputChanged:Connect(function(input)
@@ -749,6 +929,30 @@ function Library:CreateWindow(cfg)
         -- A destroyed window must release its active pointer session too;
         -- otherwise a slider/resize end-state can be stranded mid-animation.
         WindowJanitor:Add(function() finishDrag("destroyed") end)
+        -- [FIX v4.0] Some touch releases are swallowed by the OS (gesture nav,
+        -- notification shade, incoming-call overlay) and never raise
+        -- InputEnded. TouchEnded is the authoritative companion there.
+        WindowJanitor:Add(UserInputService.TouchEnded:Connect(function(input)
+                local session = activeDrag
+                if session and session.inputType == Enum.UserInputType.Touch and input == session.input then
+                        finishDrag("touch-ended")
+                end
+        end))
+        -- [FIX v4.0] Watchdog: a mouse released outside the Roblox window can
+        -- also skip InputEnded. Retire any session older than 30s defensively.
+        local dragWatchdogConnection = RunService.Heartbeat:Connect(function()
+                local session = activeDrag
+                if session and os.clock() - session.born > 30 then
+                        finishDrag("watchdog")
+                end
+        end)
+        WindowJanitor:Add(function() dragWatchdogConnection:Disconnect() end)
+
+        -- [FIX v4.0] Forward-declared so helpers defined above this point
+        -- (ripple, dropdown portal math, cursor glow) capture the REAL local
+        -- instead of reading a nil global that silently fell back to scale 1.
+        local uiScale = Instance.new("UIScale")
+        uiScale.Scale = 1
 
         local function ripple(parent, posX, posY, col)
                 local rp = Instance.new("Frame")
@@ -761,7 +965,13 @@ function Library:CreateWindow(cfg)
                 rp.ZIndex = 20
                 rp.Parent = parent
                 corner(rp, UDim.new(1, 0))
-                local target = math.max(parent.AbsoluteSize.X, parent.AbsoluteSize.Y) * 1.6
+                -- [FIX v4.0] AbsoluteSize is PHYSICAL (post-uiScale) while the
+                -- ripple offsets are LOGICAL (pre-scale). Dividing by the live
+                -- scale keeps the ripple centered and sized correctly on
+                -- phones, where it used to land off-center and clipped.
+                local rippleScale = math.max(uiScale and uiScale.Scale or 1, 0.01)
+                local base = math.max(parent.AbsoluteSize.X, parent.AbsoluteSize.Y) / rippleScale
+                local target = base * 1.6
                 local t = Tween(rp, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                         { Size = UDim2.new(0, target, 0, target), BackgroundTransparency = 1 })
                 if t then t.Completed:Connect(function() rp:Destroy() end) else rp:Destroy() end
@@ -810,6 +1020,13 @@ function Library:CreateWindow(cfg)
         overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
         overlayGui.DisplayOrder = screenGui.DisplayOrder + 1
         overlayGui:SetAttribute("RezurXOverlay", true)
+        -- [FIX v4.0] Mirror the motion-preference attributes onto the popup
+        -- layer. motionScaleFor() walks ancestors reading these attributes;
+        -- the overlay never had them, so dropdowns, pickers, modals, and the
+        -- command palette ignored ReducedMotion/MotionScale entirely while
+        -- the settings panel happily claimed they worked.
+        overlayGui:SetAttribute("RezurXReducedMotion", reducedMotion)
+        overlayGui:SetAttribute("RezurXMotionScale", motionScale)
         local overlayAttached = pcall(function() overlayGui.Parent = screenGui.Parent end)
         if overlayAttached and overlayGui.Parent then
                 WindowJanitor:Add(overlayGui, "Destroy")
@@ -825,14 +1042,8 @@ function Library:CreateWindow(cfg)
                 local cam = workspace.CurrentCamera
                 return cam and cam.ViewportSize or Vector2.new(1920, 1080)
         end
-        -- [FIX] uiScale used to be created AFTER the first updateScale() call,
-        -- but updateScale() only writes to it if it already exists
-        -- (screenGui:FindFirstChild("UIScale")) — so that first call was a
-        -- silent no-op, and the panel rendered at full (unscaled) size for up
-        -- to 0.3s on every load before snapping down to the correct mobile
-        -- scale. Creating it first means the very first call actually takes.
-        local uiScale = Instance.new("UIScale")
-        uiScale.Scale = 1
+        -- uiScale was forward-declared above (before ripple) and is only
+        -- parented here, once the ScreenGui itself exists.
         uiScale.Parent = screenGui
         local function updateScale()
                 local vp = getViewport()
@@ -864,20 +1075,56 @@ function Library:CreateWindow(cfg)
         local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 24
 
         -- ------------------------------------------------------------
-        -- SHADOW + OUTER WINDOW
+        -- LAYERED DEPTH SHADOW (v4.0 "Glass + Glow")
+        -- Three stacked, increasingly transparent halos fake a soft
+        -- gaussian blur far better than one hard rectangle, without any
+        -- image asset. An accent-tinted rim layer gives the window a
+        -- branded "presence" on screen.
         -- ------------------------------------------------------------
-        local shadow = Instance.new("Frame")
-        shadow.Name = "Shadow"
-        -- Keep depth subtle. A large opaque backing reads as a second black
-        -- panel and looks like the window is bleeding past its own outline.
-        shadow.Size = UDim2.new(0, WIN_W + 16, 0, WIN_H + 16)
-        shadow.Position = UDim2.new(0.5, -(WIN_W + 16) / 2, 0.5, -(WIN_H + 16) / 2)
-        shadow.BackgroundColor3 = Color3.new(0, 0, 0)
-        shadow.BackgroundTransparency = 0.82
-        shadow.BorderSizePixel = 0
-        shadow.ZIndex = 1
-        shadow.Parent = screenGui
-        corner(shadow, R.outer + 6)
+        local shadowLayers = {}
+        local shadowSpec = {
+                { pad = 30, transparency = 0.955, corner = R.outer + 22, z = 1 },
+                { pad = 16, transparency = 0.925, corner = R.outer + 11, z = 1 },
+                { pad = 7,  transparency = 0.845, corner = R.outer + 5,  z = 1 },
+        }
+        local shadow -- innermost layer doubles as the legacy `shadow` reference
+        for specIndex, spec in ipairs(shadowSpec) do
+                local layer = Instance.new("Frame")
+                layer.Name = "Shadow" .. specIndex
+                layer.Size = UDim2.new(0, WIN_W + spec.pad * 2, 0, WIN_H + spec.pad * 2)
+                layer.Position = UDim2.new(0.5, -(WIN_W + spec.pad * 2) / 2, 0.5, -(WIN_H + spec.pad * 2) / 2)
+                layer.BackgroundColor3 = Color3.new(0, 0, 0)
+                layer.BackgroundTransparency = spec.transparency
+                layer.BorderSizePixel = 0
+                layer.ZIndex = spec.z
+                layer.Parent = screenGui
+                corner(layer, spec.corner)
+                table.insert(shadowLayers, layer)
+                if specIndex == #shadowSpec then shadow = layer end
+        end
+        -- v4.0: single source of truth for sizing the layered shadow box so
+        -- minimize / resize / drag / hide all stay in lockstep with `frame`.
+        local function applyShadowBox(w, h)
+                for i = 1, #shadowLayers do
+                        local pad = shadowSpec[i].pad * 2
+                        shadowLayers[i].Size = UDim2.new(0, w + pad, 0, h + pad)
+                end
+        end
+        local function setShadowVisible(v)
+                for i = 1, #shadowLayers do shadowLayers[i].Visible = v end
+        end
+        local function setShadowTransparency(mode)
+                -- "lift" (dragging / resizing): deepen the shadow for focus.
+                -- "rest": return each layer to its designed transparency.
+                local lift = mode == "lift"
+                for i = 1, #shadowLayers do
+                        Tween(shadowLayers[i], T15, {
+                                BackgroundTransparency = lift
+                                        and math.max(shadowSpec[i].transparency - 0.18, 0.3)
+                                        or shadowSpec[i].transparency,
+                        })
+                end
+        end
 
         -- Faint accent-tinted ambient glow, wider than the shadow and mostly
         -- transparent — gives the window a bit of branded "premium" presence
@@ -917,6 +1164,74 @@ function Library:CreateWindow(cfg)
                 Tween(frame, T20, { BackgroundColor3 = C.bg })
                 Tween(frameStroke, T20, { Color = C.borderAcc })
         end)
+
+        -- GLASS EDGE (v4.0): a 1px-inset hairline with a vertical white
+        -- gradient is the signature of frosted glass — light catches the
+        -- top edge and dissolves toward the bottom.
+        local glassEdge = Instance.new("Frame")
+        glassEdge.Name = "GlassEdge"
+        glassEdge.Size = UDim2.new(1, -2, 1, -2)
+        glassEdge.Position = UDim2.new(0, 1, 0, 1)
+        glassEdge.BackgroundTransparency = 0.90
+        glassEdge.BackgroundColor3 = C.white
+        glassEdge.BorderSizePixel = 0
+        glassEdge.ZIndex = 3
+        glassEdge.Parent = frame
+        corner(glassEdge, R.outer - 1)
+        local glassEdgeGrad = Instance.new("UIGradient")
+        glassEdgeGrad.Rotation = 90
+        glassEdgeGrad.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0.0, 0.10),
+                NumberSequenceKeypoint.new(0.35, 0.55),
+                NumberSequenceKeypoint.new(1.0, 0.92),
+        })
+        glassEdgeGrad.Parent = glassEdge
+
+        -- ENTRANCE (v4.0): the window materializes with a soft spring —
+        -- scale up from 0.94 with a fade. Uses a window-local UIScale so it
+        -- composes with (never fights) the screen-level mobile uiScale.
+        -- When the key gate is pending, the play is deferred until unlock.
+        local runEntrance = nil
+        do
+                local enterScale = Instance.new("UIScale")
+                enterScale.Name = "EntranceScale"
+                enterScale.Scale = 1
+                enterScale.Parent = frame
+                for i = 1, #shadowLayers do
+                        shadowLayers[i].BackgroundTransparency = 1
+                end
+                ambientGlow.BackgroundTransparency = 1
+                frame.BackgroundTransparency = 1
+                glassEdge.BackgroundTransparency = 1
+                frameStroke.Transparency = 1
+                runEntrance = function()
+                        local ok = pcall(function()
+                                enterScale.Scale = 0.94
+                                Tween(enterScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                        { Scale = 1 })
+                                for i = 1, #shadowLayers do
+                                        Tween(shadowLayers[i], T40, { BackgroundTransparency = shadowSpec[i].transparency })
+                                end
+                                Tween(ambientGlow, T40, { BackgroundTransparency = 0.93 })
+                                Tween(frame, T40, { BackgroundTransparency = 0 })
+                                Tween(glassEdge, T40, { BackgroundTransparency = 0.90 })
+                                Tween(frameStroke, T40, { Transparency = 0.55 })
+                                task.wait(0.5)
+                                if enterScale and enterScale.Parent then enterScale.Scale = 1 end
+                        end)
+                        if not ok and frame.Parent then
+                                -- Never leave a half-entranced window on screen.
+                                frame.BackgroundTransparency = 0
+                                glassEdge.BackgroundTransparency = 0.90
+                                frameStroke.Transparency = 0.55
+                                for i = 1, #shadowLayers do
+                                        shadowLayers[i].BackgroundTransparency = shadowSpec[i].transparency
+                                end
+                                ambientGlow.BackgroundTransparency = 0.93
+                        end
+                end
+                if not keyGatePending then task.spawn(runEntrance) end
+        end
 
         local body = Instance.new("Frame")
         body.Name = "Body"
@@ -1049,6 +1364,37 @@ function Library:CreateWindow(cfg)
         brandLetter.TextYAlignment = Enum.TextYAlignment.Center
         brandLetter.ZIndex = 6
         brandLetter.Parent = brandMark
+        -- [v4.0] WINDOW ICON — a number asset id or rbx URI replaces the badge
+        -- letter with an image (Rayfield-style topbar icon). Emoji/text values
+        -- keep the text badge.
+        local windowIconUri = nil
+        do
+                local iconValue = cfg.Icon
+                if type(iconValue) == "number" and iconValue ~= 0 then
+                        windowIconUri = "rbxassetid://" .. iconValue
+                elseif type(iconValue) == "string" then
+                        local lower = string.lower(iconValue)
+                        if string.sub(lower, 1, 13) == "rbxassetid://"
+                                or string.sub(lower, 1, 11) == "rbxasset://"
+                                or string.sub(lower, 1, 11) == "rbxthumb://" then
+                                windowIconUri = iconValue
+                        end
+                end
+        end
+        if windowIconUri then
+                local iconImg = Instance.new("ImageLabel")
+                iconImg.Name = "WindowIcon"
+                iconImg.Size = UDim2.fromScale(0.72, 0.72)
+                iconImg.Position = UDim2.fromScale(0.5, 0.5)
+                iconImg.AnchorPoint = Vector2.new(0.5, 0.5)
+                iconImg.BackgroundTransparency = 1
+                iconImg.Image = windowIconUri
+                iconImg.ZIndex = 7
+                iconImg.Parent = brandMark
+                brandLetter.Visible = false
+                -- The floating restore button mirrors the icon later, once
+                -- floatIcon exists (see the restore-button section).
+        end
         local function applyBrandText(nextText)
                 brandText = limitBadgeText(nextText, "R")
                 brandLetter.Text = brandText
@@ -1091,6 +1437,57 @@ function Library:CreateWindow(cfg)
                         Tween(logoGlow, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
                                 { BackgroundTransparency = 0.97 })
                         task.wait(1.6)
+                end
+        end) end
+
+        -- HEADER SHIMMER SWEEP (v4.0): a soft diagonal light band glides
+        -- across the title bar every few seconds — the "animated gradient
+        -- header" of the Glass + Glow direction. Edges dissolve via the
+        -- gradient's transparency sequence so it never reads as a hard bar.
+        if animatedAccents then task.spawn(function()
+                local sweep = Instance.new("Frame")
+                sweep.Name = "HeaderSweep"
+                sweep.Size = UDim2.new(0, 130, 1.4, 0)
+                sweep.AnchorPoint = Vector2.new(0.5, 0.5)
+                sweep.Position = UDim2.new(-0.3, 0, 0.5, 0)
+                sweep.BackgroundColor3 = C.white
+                sweep.BackgroundTransparency = 0.78
+                sweep.BorderSizePixel = 0
+                sweep.Rotation = 12
+                sweep.ZIndex = 4 -- under the title/labels (ZIndex 5+)
+                sweep.Parent = header
+                corner(sweep, R.pill)
+                local sweepGrad = Instance.new("UIGradient")
+                sweepGrad.Rotation = 0
+                sweepGrad.Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0.0, 1.0),
+                        NumberSequenceKeypoint.new(0.5, 0.10),
+                        NumberSequenceKeypoint.new(1.0, 1.0),
+                })
+                sweepGrad.Parent = sweep
+                onTheme(function() sweep.BackgroundColor3 = C.white end)
+                while header.Parent do
+                        if reducedMotion then break end
+                        sweep.Position = UDim2.new(-0.3, 0, 0.5, 0)
+                        Tween(sweep, TweenInfo.new(2.0, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                { Position = UDim2.new(1.3, 0, 0.5, 0) })
+                        task.wait(6.4)
+                end
+        end) end
+
+        -- LIVING HEADER GRADIENT (v4.0): rock the header gradient's rotation
+        -- slowly back and forth so the surface reads as lit glass rather than
+        -- a static fill. TweenService tweens UIGradient.Rotation natively.
+        if animatedAccents then task.spawn(function()
+                while header.Parent do
+                        if reducedMotion then break end
+                        Tween(headerGrad, TweenInfo.new(6.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                { Rotation = 124 })
+                        task.wait(6.5)
+                        if not header.Parent then break end
+                        Tween(headerGrad, TweenInfo.new(6.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                { Rotation = 78 })
+                        task.wait(6.5)
                 end
         end) end
 
@@ -1347,13 +1744,25 @@ function Library:CreateWindow(cfg)
                 return restoreText
         end
         applyRestoreText(restoreText)
+        -- [v4.0] Mirror the window's asset icon onto the floating restore
+        -- button (and hide the text) when one is configured.
+        if windowIconUri then
+                local floatImg = Instance.new("ImageLabel")
+                floatImg.Name = "FloatIconImage"
+                floatImg.Size = UDim2.fromScale(0.62, 0.62)
+                floatImg.Position = UDim2.fromScale(0.5, 0.5)
+                floatImg.AnchorPoint = Vector2.new(0.5, 0.5)
+                floatImg.BackgroundTransparency = 1
+                floatImg.Image = windowIconUri
+                floatImg.ZIndex = 2
+                floatImg.Parent = floatIcon
+        end
         -- [FIX] Track movement so tap (restore) vs drag (move) is distinguished
         local floatDragMoved = false
         floatIcon.InputBegan:Connect(function(inp)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1 or inp.UserInputType == Enum.UserInputType.Touch then
                         local startPointer = Vector2.new(inp.Position.X, inp.Position.Y)
                         floatDragMoved = false
-                        local vp = getViewport()
                         -- Pointer events and AbsolutePosition are both in physical
                         -- screen pixels. Mixing them with Position.Offset discards
                         -- the initial 0.5 scale position and caused the first move to
@@ -1363,12 +1772,18 @@ function Library:CreateWindow(cfg)
                         local pointerOffset = startPointer - startAbs
                         local iconWidth = math.max(floatIcon.AbsoluteSize.X, 1)
                         local iconHeight = math.max(floatIcon.AbsoluteSize.Y, 1)
-                        local overlayScale = overlayGui == screenGui
-                                and math.max(uiScale.Scale, 0.01) or 1
                         registerDrag("floatIcon", inp, function(pos)
                                 local pointer = Vector2.new(pos.X, pos.Y)
                                 local d = pointer - startPointer
                                 if d.Magnitude > 6 then floatDragMoved = true end
+                                -- [FIX v4.0] Re-read the viewport and overlay scale every
+                                -- move instead of freezing them at press time: rotating
+                                -- the device (or resizing the window) mid-drag used to
+                                -- clamp against stale bounds and could drop the icon
+                                -- outside the new viewport until the next drag.
+                                local vp = getViewport()
+                                local overlayScale = overlayGui == screenGui
+                                        and math.max(uiScale.Scale, 0.01) or 1
                                 -- Preserve the point the user grabbed. This keeps an
                                 -- edge grab under the cursor/finger instead of snapping
                                 -- the button's top-left toward the pointer on first move.
@@ -1415,7 +1830,7 @@ function Library:CreateWindow(cfg)
                         )
                 end
                 translate(frame)
-                translate(shadow)
+                for i = 1, #shadowLayers do translate(shadowLayers[i]) end
                 translate(ambientGlow)
         end
 
@@ -1455,14 +1870,14 @@ function Library:CreateWindow(cfg)
                                         moved = true
                                         -- Position itself follows the pointer directly;
                                         -- only depth cues animate, so drag remains crisp.
-                                        Tween(shadow, T15, { BackgroundTransparency = 0.65 })
+                                        setShadowTransparency("lift")
                                         Tween(ambientGlow, T15, { BackgroundTransparency = 0.87 })
                                         Tween(frameStroke, T15, { Transparency = 0.15 })
                                 end
                                 local targetX, targetY = clampWindowPosition(startAbs.X + d.X, startAbs.Y + d.Y)
                                 moveWindowTo(targetX, targetY)
                         end, function()
-                                Tween(shadow, T15, { BackgroundTransparency = 0.82 })
+                                setShadowTransparency("rest")
                                 Tween(ambientGlow, T15, { BackgroundTransparency = 0.93 })
                                 Tween(frameStroke, T15, { Transparency = 0.55 })
                         end)
@@ -1692,8 +2107,11 @@ function Library:CreateWindow(cfg)
         -- compact, fully inset three-dot grip.
         local resizeHandle = Instance.new("TextButton")
         resizeHandle.Name = "ResizeHandle"
-        resizeHandle.Size = UDim2.fromOffset(24, 24)
-        resizeHandle.Position = UDim2.new(1, -35, 1, -30)
+        -- [FIX v4.0] 40x40 hit area (mobile minimum) while the visible grip
+        -- stays a compact three-dot cluster; 24x24 was nearly impossible to
+        -- hit reliably with a thumb.
+        resizeHandle.Size = UDim2.fromOffset(40, 40)
+        resizeHandle.Position = UDim2.new(1, -46, 1, -42)
         resizeHandle.BackgroundTransparency = 1
         resizeHandle.Text = ""
         resizeHandle.AutoButtonColor = false
@@ -1707,7 +2125,7 @@ function Library:CreateWindow(cfg)
                 local dot = Instance.new("Frame")
                 dot.Name = "GripDot" .. index
                 dot.Size = UDim2.fromOffset(3, 3)
-                dot.Position = UDim2.fromOffset(7 + (index - 1) * 4, 15 - (index - 1) * 4)
+                dot.Position = UDim2.fromOffset(15 + (index - 1) * 4, 25 - (index - 1) * 4)
                 dot.BackgroundColor3 = C.muted
                 dot.BorderSizePixel = 0
                 dot.ZIndex = 9
@@ -1728,9 +2146,10 @@ function Library:CreateWindow(cfg)
                 local dragStart = inp.Position
                 local startW, startH = WIN_W, WIN_H
                 local startFramePosition = frame.Position
-                local startShadowPosition = shadow.Position
+                local startShadowPositions = {}
+                for i = 1, #shadowLayers do startShadowPositions[i] = shadowLayers[i].Position end
                 local scale = math.max(uiScale.Scale, 0.01)
-                Tween(shadow, T15, { BackgroundTransparency = 0.65 })
+                setShadowTransparency("lift")
                 Tween(ambientGlow, T15, { BackgroundTransparency = 0.87 })
                 Tween(frameStroke, T15, { Transparency = 0.15 })
                 registerDrag("resize", inp, function(pos)
@@ -1741,8 +2160,10 @@ function Library:CreateWindow(cfg)
                         WIN_H = newH
                         frame.Position = startFramePosition
                         frame.Size = UDim2.new(0, newW, 0, newH)
-                        shadow.Position = startShadowPosition
-                        shadow.Size = UDim2.new(0, newW + 16, 0, newH + 16)
+                        for i = 1, #shadowLayers do
+                                shadowLayers[i].Position = startShadowPositions[i]
+                        end
+                        applyShadowBox(newW, newH)
                         ambientGlow.Size = UDim2.new(0, newW + 70, 0, newH + 70)
                         if not minimized then
                                 body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
@@ -1755,7 +2176,7 @@ function Library:CreateWindow(cfg)
                         updateScale()
                         local x, y = clampWindowPosition(pinned.X, pinned.Y)
                         moveWindowTo(x, y)
-                        Tween(shadow, T15, { BackgroundTransparency = 0.82 })
+                        setShadowTransparency("rest")
                         Tween(ambientGlow, T15, { BackgroundTransparency = 0.93 })
                         Tween(frameStroke, T15, { Transparency = 0.55 })
                 end)
@@ -1771,11 +2192,99 @@ function Library:CreateWindow(cfg)
         local currentPopupJanitor = nil
         local function closeCurrentPopup()
                 if currentPopupJanitor then
-                        currentPopupJanitor:Cleanup()
+                        local jan = currentPopupJanitor
                         currentPopupJanitor = nil
+                        -- [FIX v4.0] A popup closed mid-drag (second finger tapping
+                        -- Done, catcher, toggle-keybind hiding the window) used to
+                        -- leave the active drag session stranded: every mouse move
+                        -- kept driving a destroyed pad/hue slider and kept firing
+                        -- the live-color callback. Ending the drag BEFORE cleanup
+                        -- guarantees the session can never outlive its popup.
+                        finishDrag("popup-closed")
+                        jan:Cleanup()
                 end
         end
         WindowJanitor:Add(closeCurrentPopup)
+
+        -- ------------------------------------------------------------
+        -- CURSOR GLOW (v4.0) — ambient accent light under the pointer.
+        -- Desktop-only (needs a mouse); auto-disabled with reduced motion.
+        -- Three nested circles at rising transparency fake a soft radial
+        -- falloff without any image asset. Pressing brightens it, releasing
+        -- settles it back; a slow breathing loop keeps it alive at idle.
+        -- ------------------------------------------------------------
+        local cursorGlowRoot = nil
+        if UserInputService.MouseEnabled and cfg.CursorGlow ~= false and not reducedMotion then
+                cursorGlowRoot = Instance.new("Frame")
+                cursorGlowRoot.Name = "CursorGlow"
+                cursorGlowRoot.Size = UDim2.fromOffset(132, 132)
+                cursorGlowRoot.AnchorPoint = Vector2.new(0.5, 0.5)
+                cursorGlowRoot.BackgroundTransparency = 1
+                cursorGlowRoot.Visible = false
+                cursorGlowRoot.ZIndex = 2 -- beneath popups/notifications/tooltips
+                cursorGlowRoot.Parent = overlayGui
+                local glowRings = {}
+                local ringSpec = {
+                        { size = 1.00, transparency = 0.955 },
+                        { size = 0.60, transparency = 0.940 },
+                        { size = 0.32, transparency = 0.915 },
+                }
+                for ringIndex = 1, #ringSpec do
+                        local spec = ringSpec[ringIndex]
+                        local ring = Instance.new("Frame")
+                        ring.Name = "GlowRing" .. ringIndex
+                        ring.Size = UDim2.fromScale(spec.size, spec.size)
+                        ring.AnchorPoint = Vector2.new(0.5, 0.5)
+                        ring.Position = UDim2.fromScale(0.5, 0.5)
+                        ring.BackgroundColor3 = C.accent
+                        ring.BackgroundTransparency = spec.transparency
+                        ring.BorderSizePixel = 0
+                        ring.ZIndex = 2
+                        ring.Parent = cursorGlowRoot
+                        corner(ring, UDim.new(1, 0))
+                        table.insert(glowRings, { frame = ring, rest = spec.transparency })
+                end
+                onTheme(function()
+                        for _, ring in ipairs(glowRings) do ring.frame.BackgroundColor3 = C.accent end
+                end)
+                WindowJanitor:Add(UserInputService.InputChanged:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.MouseMovement then
+                                if not cursorGlowRoot.Parent then return end
+                                if not cursorGlowRoot.Visible then cursorGlowRoot.Visible = true end
+                                cursorGlowRoot.Position = UDim2.new(0, input.Position.X, 0, input.Position.Y)
+                        end
+                end))
+                WindowJanitor:Add(UserInputService.InputBegan:Connect(function(input)
+                        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+                        if not cursorGlowRoot.Parent then return end
+                        for _, ring in ipairs(glowRings) do
+                                Tween(ring.frame, T10, { BackgroundTransparency = math.max(ring.rest - 0.16, 0.5) })
+                        end
+                end))
+                WindowJanitor:Add(UserInputService.InputEnded:Connect(function(input)
+                        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
+                        if not cursorGlowRoot.Parent then return end
+                        for _, ring in ipairs(glowRings) do
+                                Tween(ring.frame, T20, { BackgroundTransparency = ring.rest })
+                        end
+                end))
+                if animatedAccents then task.spawn(function()
+                        while cursorGlowRoot.Parent do
+                                if reducedMotion then break end
+                                for _, ring in ipairs(glowRings) do
+                                        Tween(ring.frame, TweenInfo.new(2.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                { BackgroundTransparency = ring.rest + 0.012 })
+                                end
+                                task.wait(2.4)
+                                if not cursorGlowRoot.Parent then break end
+                                for _, ring in ipairs(glowRings) do
+                                        Tween(ring.frame, TweenInfo.new(2.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                { BackgroundTransparency = ring.rest })
+                                end
+                                task.wait(2.4)
+                        end
+                end) end
+        end
 
         -- ------------------------------------------------------------
         -- NOTIFICATIONS
@@ -1801,7 +2310,11 @@ function Library:CreateWindow(cfg)
                         error   = { icon = "✕", color = C.red },
                 }
                 ntype = ntype or "info"
-                duration = duration or 5
+                -- [FIX v4.0] Coerce duration: a string or other truthy non-number
+                -- (very common when configs come from deserialized JSON) used to
+                -- make task.delay throw "invalid argument #1" straight into the
+                -- caller of Window:Notify, and the toast was never created.
+                duration = math.clamp(tonumber(duration) or 5, 0.1, 3600)
                 local ncfg = NTYPES[ntype] or NTYPES.info
                 local col = ncfg.color
                 local actionList = type(actions) == "table" and actions or {}
@@ -1969,8 +2482,10 @@ function Library:CreateWindow(cfg)
         -- ------------------------------------------------------------
         -- MINIMIZE LOGIC (moved here from right after minBtn's creation —
         -- it needs tabBar/content/statusBar, which don't exist that early)
+        -- [FIX v4.0] `minimized` itself is forward-declared above the resize
+        -- handler. Re-declaring it here would shadow that upvalue and
+        -- reintroduce the resize/minimize desync bug.
         -- ------------------------------------------------------------
-        local minimized = false
         local function setMinimized(nextValue)
                 minimized = nextValue == true
                 if minimized then
@@ -1980,7 +2495,9 @@ function Library:CreateWindow(cfg)
                         resizeHandle.Visible = false
                         Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, HEADER_H) })
                         Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, 0) })
-                        Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 16, 0, HEADER_H + 16) })
+                        for i = 1, #shadowLayers do
+                                Tween(shadowLayers[i], TMIN, { Size = UDim2.new(0, WIN_W + shadowSpec[i].pad * 2, 0, HEADER_H + shadowSpec[i].pad * 2) })
+                        end
                         Tween(ambientGlow, TMIN, { Size = UDim2.new(0, WIN_W + 70, 0, HEADER_H + 70) })
                         Tween(minGlyph, T20, { Rotation = 180 })
                 else
@@ -1991,7 +2508,9 @@ function Library:CreateWindow(cfg)
                         -- recompute body height from current WIN_H (supports resize)
                         Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
                         Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, WIN_H - HEADER_H) })
-                        Tween(shadow, TMIN, { Size = UDim2.new(0, WIN_W + 16, 0, WIN_H + 16) })
+                        for i = 1, #shadowLayers do
+                                Tween(shadowLayers[i], TMIN, { Size = UDim2.new(0, WIN_W + shadowSpec[i].pad * 2, 0, WIN_H + shadowSpec[i].pad * 2) })
+                        end
                         Tween(ambientGlow, TMIN, { Size = UDim2.new(0, WIN_W + 70, 0, WIN_H + 70) })
                         Tween(minGlyph, T20, { Rotation = 0 })
                 end
@@ -2025,13 +2544,14 @@ function Library:CreateWindow(cfg)
                         closeCommandPalette()
                         closeModal()
                         frame.Visible = false
-                        shadow.Visible = false
+                        setShadowVisible(false)
                         ambientGlow.Visible = false
+                        if cursorGlowRoot then cursorGlowRoot.Visible = false end
                         floatIcon.Visible = true
                 else
                         floatIcon.Visible = false
                         frame.Visible = true
-                        shadow.Visible = true
+                        setShadowVisible(true)
                         ambientGlow.Visible = true
                         if not minimized then
                                 tabBar.Visible = true
@@ -2229,7 +2749,21 @@ function Library:CreateWindow(cfg)
         function Window:CreateTab(name, icon)
                 local tab = {}
                 local tabName = tostring(name or "Tab")
-                local iconText = icon ~= nil and tostring(icon) or ""
+                -- [v4.0] Tab icons accept three kinds of value, mirroring the
+                -- window icon: number asset ids and rbxasset/rbxthumb URIs
+                -- render as an ImageLabel; any other string stays emoji text.
+                local tabIconUri = nil
+                if type(icon) == "number" and icon ~= 0 then
+                        tabIconUri = "rbxassetid://" .. icon
+                elseif type(icon) == "string" and icon ~= "" then
+                        local lower = string.lower(icon)
+                        if string.sub(lower, 1, 13) == "rbxassetid://"
+                                or string.sub(lower, 1, 11) == "rbxasset://"
+                                or string.sub(lower, 1, 11) == "rbxthumb://" then
+                                tabIconUri = icon
+                        end
+                end
+                local iconText = (not tabIconUri) and (icon ~= nil and tostring(icon) or "") or ""
 
                 local btn = Instance.new("TextButton")
                 btn.Name = "TabChip"
@@ -2242,7 +2776,7 @@ function Library:CreateWindow(cfg)
                 -- [FIX] Use GothamMedium for better emoji rendering + add 8px extra
                 -- width since TextService:GetTextSize may undermeasure emoji glyphs.
                 local measured = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium, Vector2.new(1000, 24))
-                local tabWidth = math.max(76, math.ceil(measured.X) + 36)
+                local tabWidth = math.max(76, math.ceil(measured.X) + 36 + (tabIconUri and 26 or 0))
                 btn.Size = UDim2.new(0, tabWidth, 0, TABBAR_H - 10)
                 btn.BackgroundColor3 = C.tabChip
                 btn.AutoButtonColor = false
@@ -2272,6 +2806,21 @@ function Library:CreateWindow(cfg)
                 textLbl.Text = btnText
                 textLbl.ZIndex = 5
                 textLbl.Parent = btn
+                -- [v4.0] Asset tab icon: an 18px image sits left of the title
+                -- (Rayfield-style), and the title label shifts right to fit.
+                local tabIconImg = nil
+                if tabIconUri then
+                        tabIconImg = Instance.new("ImageLabel")
+                        tabIconImg.Name = "TabIcon"
+                        tabIconImg.Size = UDim2.fromOffset(18, 18)
+                        tabIconImg.Position = UDim2.new(0, 9, 0.5, -9)
+                        tabIconImg.BackgroundTransparency = 1
+                        tabIconImg.Image = tabIconUri
+                        tabIconImg.ZIndex = 5
+                        tabIconImg.Parent = btn
+                        textLbl.Position = UDim2.fromOffset(30, 0)
+                        textLbl.Size = UDim2.new(1, -38, 1, 0)
+                end
 
                 local page = Instance.new("ScrollingFrame")
                 page.Size = UDim2.new(1, 0, 1, 0)
@@ -2304,7 +2853,11 @@ function Library:CreateWindow(cfg)
                         btnText = iconText ~= "" and (iconText .. "  " .. tabName) or tabName
                         textLbl.Text = btnText
                         local newMeasure = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium, Vector2.new(1000, 24))
-                        local newWidth = math.max(76, math.ceil(newMeasure.X) + 28)
+                        -- [FIX v4.0] Same +36 padding as creation (emoji undermeasure
+                        -- buffer included) plus the icon lane when one is present.
+                        -- The old +28 here made retitled chips ~8px narrower than the
+                        -- identical title at creation and clipped emoji-bearing retitles.
+                        local newWidth = math.max(76, math.ceil(newMeasure.X) + 36 + (tabIconUri and 26 or 0))
                         btn.Size = UDim2.new(0, newWidth, 0, TABBAR_H - 10)
                         task.defer(function()
                                 if ActiveTab == tab and btn.Parent then
@@ -2356,6 +2909,35 @@ function Library:CreateWindow(cfg)
                         Tween(chipStroke, T20, { Transparency = 1 })
                         Tween(textLbl, T20, { TextColor3 = C.accentHi })
                         moveIndicatorTo(btn, not skipAnim)
+                        -- STAGGER ENTRANCE (v4.0): cards settle in one after
+                        -- another when a tab opens. UIScale per element means
+                        -- the UIListLayout keeps owning positions — nothing
+                        -- fights the layout. Capped so giant pages don't drag.
+                        if not reducedMotion then
+                                local cards = {}
+                                for _, child in ipairs(page:GetChildren()) do
+                                        if child:IsA("GuiObject") and not child:IsA("UIGridStyleLayout") then
+                                                if child:IsA("Frame") or child:IsA("TextButton") then
+                                                        table.insert(cards, child)
+                                                end
+                                        end
+                                end
+                                for index = 1, math.min(#cards, 16) do
+                                        local card = cards[index]
+                                        task.delay((index - 1) * 0.022, function()
+                                                if not card.Parent or not tab.Page.Visible then return end
+                                                local es = card:FindFirstChild("_StaggerScale")
+                                                if not es then
+                                                        es = Instance.new("UIScale")
+                                                        es.Name = "_StaggerScale"
+                                                        es.Parent = card
+                                                end
+                                                es.Scale = 0.965
+                                                Tween(es, TweenInfo.new(0.30, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                                        { Scale = 1 })
+                                        end)
+                                end
+                        end
                         -- Let Roblox settle the horizontal layout once, then
                         -- snap the indicator to the final measured label width.
                         task.defer(function()
@@ -2420,17 +3002,113 @@ function Library:CreateWindow(cfg)
                                 ColorSequenceKeypoint.new(0, C.panelAlt),
                                 ColorSequenceKeypoint.new(1, C.panel),
                         }), 90)
+                        -- GLASS SHEEN (v4.0): a soft top-light that dissolves
+                        -- downward — the frosted-glass signature on every card.
+                        -- ZIndex 0 keeps it beneath all content siblings.
+                        local sheen = Instance.new("Frame")
+                        sheen.Name = "GlassSheen"
+                        sheen.Size = UDim2.new(1, 0, 0, math.clamp(math.floor(h * 0.55), 12, 38))
+                        sheen.BackgroundColor3 = C.white
+                        sheen.BackgroundTransparency = 0.90
+                        sheen.BorderSizePixel = 0
+                        sheen.ZIndex = 0
+                        sheen.Parent = holder
+                        corner(sheen, R.panel)
+                        local sheenGrad = Instance.new("UIGradient")
+                        sheenGrad.Rotation = 90
+                        sheenGrad.Transparency = NumberSequence.new({
+                                NumberSequenceKeypoint.new(0.0, 0.05),
+                                NumberSequenceKeypoint.new(1.0, 1.0),
+                        })
+                        sheenGrad.Parent = sheen
                         onTheme(function()
                                 surfaceGradient.Color = ColorSequence.new({
                                         ColorSequenceKeypoint.new(0, C.panelAlt),
                                         ColorSequenceKeypoint.new(1, C.panel),
                                 })
                         end)
+                        -- [FIX v4.0] A tooltip showing on an element that gets
+                        -- destroyed used to float ownerless until the next hover
+                        -- somewhere else. Destroying is the reliable last beat.
+                        holder.Destroying:Connect(hideTooltip)
                         return holder, strk
                 end
 
                 local function registerFlag(flag, obj)
-                        if flag then Library.Flags[flag] = obj end
+                        if not flag then return end
+                        Library.Flags[flag] = obj
+                        -- [v4.0] Also register per-window for ConfigurationSaving.
+                        Window.Flags[flag] = obj
+                        -- [FIX v4.0] Auto-deregister the flag when the element is
+                        -- destroyed. Destroyed elements used to keep reporting
+                        -- stale values through Library.Flags — GetFlag kept
+                        -- returning them and SaveConfiguration serialized dead
+                        -- state. Also hides any tooltip the element was showing.
+                        if type(obj) == "table" and type(obj.Destroy) == "function" then
+                                local origDestroy = obj.Destroy
+                                local destroyed = false
+                                obj.Destroy = function(self, ...)
+                                        if not destroyed then
+                                                destroyed = true
+                                                if Library.Flags[flag] == obj then
+                                                        Library.Flags[flag] = nil
+                                                end
+                                                if Window.Flags[flag] == obj then
+                                                        Window.Flags[flag] = nil
+                                                end
+                                                hideTooltip()
+                                        end
+                                        return origDestroy(self, ...)
+                                end
+                        end
+                end
+
+                -- ========================================================
+                -- [v4.0] ELEMENT ICONS — Rayfield-style asset support.
+                -- number          -> "rbxassetid://<n>"
+                -- "rbxassetid://…", "rbxasset://…", "rbxthumb://…" -> passthrough
+                -- any other string -> treated as emoji/text (no ImageLabel)
+                -- ========================================================
+                local function iconAssetUri(value)
+                        if value == nil or value == 0 or value == "" then return nil end
+                        if type(value) == "number" then
+                                return "rbxassetid://" .. value
+                        elseif type(value) == "string" then
+                                local lower = string.lower(value)
+                                if string.sub(lower, 1, 13) == "rbxassetid://"
+                                        or string.sub(lower, 1, 11) == "rbxasset://"
+                                        or string.sub(lower, 1, 11) == "rbxthumb://" then
+                                        return value
+                                end
+                        end
+                        return nil
+                end
+
+                -- Renders an icon ImageLabel at the left of an element and shifts
+                -- the element's text label right to make room. Returns the
+                -- ImageLabel (or nil when the value was emoji/text/absent).
+                local function applyElementIcon(container, iconValue, label)
+                        local uri = iconAssetUri(iconValue)
+                        if not uri or not container then return nil end
+                        local iconInset = 14
+                        local img = Instance.new("ImageLabel")
+                        img.Name = "ElementIcon"
+                        img.Size = UDim2.fromOffset(18, 18)
+                        img.AnchorPoint = Vector2.new(0, 0.5)
+                        img.Position = UDim2.new(0, iconInset, 0.5, 0)
+                        img.BackgroundTransparency = 1
+                        img.Image = uri
+                        img.ZIndex = 3
+                        img.Parent = container
+                        if label then
+                                local pos = label.Position
+                                label.Position = UDim2.new(0, iconInset + 26, pos.Y.Scale, pos.Y.Offset)
+                                local size = label.Size
+                                if size.X.Scale >= 1 then
+                                        label.Size = UDim2.new(1, size.X.Offset - 26, size.Y.Scale, size.Y.Offset)
+                                end
+                        end
+                        return img
                 end
 
                 local function applyTooltip(instance, text)
@@ -2648,11 +3326,43 @@ function Library:CreateWindow(cfg)
                         corner(b, R.panel)
                         local strk = stroke(b, primary and C.accentDim or C.border, 1)
                         local buttonGradient = nil
+                        local runSheen = nil
                         if primary then
                                 buttonGradient = gradient(b, ColorSequence.new{
                                         ColorSequenceKeypoint.new(0.0, C.accentDim),
                                         ColorSequenceKeypoint.new(1.0, C.accentDark),
                                 }, 100)
+                                -- SHEEN SWEEP (v4.0): a diagonal light band glides across
+                                -- primary buttons on hover and click — same language as
+                                -- the header sweep, at button scale.
+                                local sweep = Instance.new("Frame")
+                                sweep.Name = "SheenSweep"
+                                sweep.Size = UDim2.new(0, 42, 1.6, 0)
+                                sweep.AnchorPoint = Vector2.new(0.5, 0.5)
+                                sweep.Position = UDim2.new(-0.35, 0, 0.5, 0)
+                                sweep.BackgroundColor3 = C.white
+                                sweep.BackgroundTransparency = 0.68
+                                sweep.BorderSizePixel = 0
+                                sweep.Rotation = 14
+                                sweep.ZIndex = 3
+                                sweep.Parent = b
+                                corner(sweep, R.pill)
+                                local sweepGrad = Instance.new("UIGradient")
+                                sweepGrad.Transparency = NumberSequence.new({
+                                        NumberSequenceKeypoint.new(0.0, 1.0),
+                                        NumberSequenceKeypoint.new(0.5, 0.06),
+                                        NumberSequenceKeypoint.new(1.0, 1.0),
+                                })
+                                sweepGrad.Parent = sweep
+                                local sweeping = false
+                                runSheen = function()
+                                        if sweeping or reducedMotion or not b.Parent then return end
+                                        sweeping = true
+                                        sweep.Position = UDim2.new(-0.35, 0, 0.5, 0)
+                                        Tween(sweep, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+                                                { Position = UDim2.new(1.3, 0, 0.5, 0) })
+                                        task.delay(0.7, function() sweeping = false end)
+                                end
                         end
 
                         local lbl = Instance.new("TextLabel")
@@ -2665,6 +3375,8 @@ function Library:CreateWindow(cfg)
                         lbl.TextXAlignment = Enum.TextXAlignment.Left
                         lbl.Text = nameText
                         lbl.Parent = b
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(b, bcfg.Icon, lbl)
 
                         local arr = Instance.new("TextLabel")
                         arr.Size = UDim2.new(0, 18, 1, 0)
@@ -2677,6 +3389,7 @@ function Library:CreateWindow(cfg)
                         arr.Parent = b
 
                         b.MouseEnter:Connect(function()
+                                if runSheen then runSheen() end
                                 Tween(b, T20, { BackgroundColor3 = primary and C.accentDim or C.panelHov })
                                 Tween(strk, T20, { Color = primary and C.accentHi or C.accentDim })
                                 Tween(arr, T20, { TextColor3 = primary and C.white or C.accent, Position = UDim2.new(1, -18, 0, 0) })
@@ -2687,6 +3400,7 @@ function Library:CreateWindow(cfg)
                                 Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted, Position = UDim2.new(1, -22, 0, 0) })
                         end)
                         b.Activated:Connect(function()
+                                if runSheen then runSheen() end
                                 ripple(b, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
                                 Tween(b, T20, { BackgroundColor3 = C.accentDim })
                                 Tween(lbl, T20, { TextColor3 = C.white })
@@ -2725,7 +3439,8 @@ function Library:CreateWindow(cfg)
                         end)
 
                         local obj = {}
-                        function obj:Set(newName) lbl.Text = newName end
+                        -- [FIX v4.0] Coerce nil like every other setter in the file.
+                        function obj:Set(newName) lbl.Text = tostring(newName or nameText) end
                         function obj:SetCallback(fn) callback = fn end
                         return obj
                 end
@@ -2803,6 +3518,8 @@ function Library:CreateWindow(cfg)
                         lbl.TextXAlignment = Enum.TextXAlignment.Left
                         lbl.Text = nameText
                         lbl.Parent = holder
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(holder, tcfg.Icon, lbl)
 
                         local sw = Instance.new("Frame")
                         sw.Size = UDim2.new(0, 42, 0, 22)
@@ -2899,7 +3616,22 @@ function Library:CreateWindow(cfg)
                         local increment = math.max(tonumber(scfg.Increment) or 1, 0.00001)
                         local suffix    = scfg.Suffix or ""
                         local callback  = scfg.Callback
-                        local value     = math.clamp(scfg.CurrentValue or minVal, minVal, maxVal)
+                        -- [FIX v4.0] Snap the INITIAL value to the increment too.
+                        -- CreateSlider({ Increment = 0.25, CurrentValue = 0.3 })
+                        -- used to display 0.3 until the first drag jumped it to
+                        -- 0.25 — a visible off-by-remainder on load. (Definition
+                        -- hoisted above the initial value; the drag path reuses it.)
+                        local function snap(v)
+                                v = math.clamp(v, minVal, maxVal)
+                                v = minVal + math.floor((v - minVal) / increment + 0.5) * increment
+                                -- kill float noise on fractional increments
+                                local mult = 1 / increment
+                                if mult == math.floor(mult) then
+                                        v = math.floor(v * mult + 0.5) / mult
+                                end
+                                return math.clamp(v, minVal, maxVal)
+                        end
+                        local value     = snap(tonumber(scfg.CurrentValue) or minVal)
                         local defaultValue = value
 
                         local holder, hStroke = makeHolder(52)
@@ -2913,6 +3645,8 @@ function Library:CreateWindow(cfg)
                         lbl.TextXAlignment = Enum.TextXAlignment.Left
                         lbl.Text = nameText
                         lbl.Parent = holder
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(holder, scfg.Icon, lbl)
 
                         local valLbl = Instance.new("TextLabel")
                         valLbl.Size = UDim2.new(0, 64, 0, 18)
@@ -2921,8 +3655,8 @@ function Library:CreateWindow(cfg)
                         valLbl.Font = Enum.Font.GothamBold
                         valLbl.TextSize = 13
                         valLbl.TextColor3 = C.accent
-					valLbl.TextStrokeTransparency = 0.4
-					valLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
+                                        valLbl.TextStrokeTransparency = 0.4
+                                        valLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
                         valLbl.TextXAlignment = Enum.TextXAlignment.Right
                         valLbl.Text = tostring(value) .. suffix
                         valLbl.Parent = holder
@@ -2969,16 +3703,6 @@ function Library:CreateWindow(cfg)
                         knobShadow.ZIndex = 2
                         knobShadow.Parent = knob
 
-                        local function snap(v)
-                                v = math.clamp(v, minVal, maxVal)
-                                v = minVal + math.floor((v - minVal) / increment + 0.5) * increment
-                                -- kill float noise on fractional increments
-                                local mult = 1 / increment
-                                if mult == math.floor(mult) then
-                                        v = math.floor(v * mult + 0.5) / mult
-                                end
-                                return math.clamp(v, minVal, maxVal)
-                        end
                         local function update(animated)
                                 local pct = math.clamp((value - minVal) / (maxVal - minVal), 0, 1)
                                 if animated then
@@ -3122,6 +3846,8 @@ function Library:CreateWindow(cfg)
                         lbl.TextXAlignment = Enum.TextXAlignment.Left
                         lbl.Text = string.upper(nameText)
                         lbl.Parent = holder
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(holder, icfg.Icon, lbl)
 
                         local box = Instance.new("TextBox")
                         box.Size = UDim2.new(1, -28, 0, 20)
@@ -3210,7 +3936,16 @@ function Library:CreateWindow(cfg)
                         local entries = makeEntries(dcfg.Options)
                         local selected = {}
                         local function matches(entry, value)
-                                return entry.Value == value or entry.Raw == value
+                                -- [FIX v4.0] Also match by the common record fields so
+                                -- obj:Set({ Value = "x" }) with a FRESH table works —
+                                -- identity comparison alone silently ignored it and
+                                -- left the selection unchanged.
+                                if entry.Value == value or entry.Raw == value then return true end
+                                if type(value) == "table" then
+                                        local inner = value.Value ~= nil and value.Value or (value.Name or value.Text or value.Label)
+                                        if inner ~= nil and (entry.Value == inner or entry.Raw == inner) then return true end
+                                end
+                                return false
                         end
                         local function recordOption(value)
                                 if type(value) ~= "table" then return false end
@@ -3255,6 +3990,8 @@ function Library:CreateWindow(cfg)
                         label.TextXAlignment = Enum.TextXAlignment.Left
                         label.TextTruncate = Enum.TextTruncate.AtEnd
                         label.Parent = holder
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(holder, dcfg.Icon, label)
 
                         local arrow = Instance.new("TextLabel")
                         arrow.Size = UDim2.fromOffset(20, 42)
@@ -3572,7 +4309,18 @@ function Library:CreateWindow(cfg)
                                         popupOpen = false
                                         arrow.Text = "▾"
                                 end)
-                                popupJanitor:Add(uiScale:GetPropertyChangedSignal("Scale"):Connect(closeCurrentPopup))
+                                -- [FIX v4.0] Closing on ANY uiScale change made Searchable
+                                -- dropdowns unusable on phones: focusing the search box
+                                -- summons the on-screen keyboard, which resizes the
+                                -- viewport, which changes uiScale, which instantly
+                                -- destroyed the popup mid-typing. Now scale changes
+                                -- inside the focus grace window are ignored; genuine
+                                -- rotations/resizes afterwards still close the popup.
+                                local scaleGraceUntil = 0
+                                popupJanitor:Add(uiScale:GetPropertyChangedSignal("Scale"):Connect(function()
+                                        if os.clock() < scaleGraceUntil then return end
+                                        closeCurrentPopup()
+                                end))
                                 if searchBox then
                                         popupJanitor:Add(searchBox:GetPropertyChangedSignal("Text"):Connect(applyFilter))
                                 end
@@ -3581,7 +4329,21 @@ function Library:CreateWindow(cfg)
 
                                 if searchBox then
                                         task.defer(function()
-                                                if popupOpen and searchBox.Parent then searchBox:CaptureFocus() end
+                                                if popupOpen and searchBox.Parent then
+                                                        -- [FIX v4.0] Arm the scale-change grace window BEFORE
+                                                        -- focusing: the mobile keyboard resizes the viewport
+                                                        -- (→ uiScale change) the moment focus lands, which the
+                                                        -- old close-on-scale listener treated as a rotation and
+                                                        -- destroyed the popup mid-typing.
+                                                        scaleGraceUntil = os.clock() + 1.25
+                                                        searchBox:CaptureFocus()
+                                                        -- Extend the window for the keyboard's settle animation.
+                                                        task.delay(0.1, function()
+                                                                if popupOpen and UserInputService:GetFocusedTextBox() == searchBox then
+                                                                        scaleGraceUntil = math.max(scaleGraceUntil, os.clock() + 1.25)
+                                                                end
+                                                        end)
+                                                end
                                         end)
                                 end
                         end
@@ -3658,6 +4420,8 @@ function Library:CreateWindow(cfg)
                         lbl.TextXAlignment = Enum.TextXAlignment.Left
                         lbl.Text = nameText
                         lbl.Parent = holder
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(holder, kcfg.Icon, lbl)
 
                         local pill = Instance.new("TextButton")
                         pill.Size = UDim2.new(0, 88, 0, 24)
@@ -3818,6 +4582,8 @@ function Library:CreateWindow(cfg)
                         lbl.TextXAlignment = Enum.TextXAlignment.Left
                         lbl.Text = nameText
                         lbl.Parent = holder
+                        -- [v4.0] Optional asset icon (number id / rbx URI).
+                        applyElementIcon(holder, ccfg.Icon, lbl)
 
                         local swatch = Instance.new("TextButton")
                         swatch.Size = UDim2.new(0, 58, 0, 30)
@@ -3998,8 +4764,15 @@ function Library:CreateWindow(cfg)
                                 doneBtn.Parent = panel
                                 corner(doneBtn, R.small)
 
-                                -- Update function — fires callback LIVE
-                                local function update()
+                                -- Update function — fires callback LIVE.
+                                -- [FIX v4.0] Split into render + notify. The old code called
+                                -- update() once on open, which fired the live callback
+                                -- immediately — opening a picker triggered the user's
+                                -- side effects (team color, remote event) with a
+                                -- slightly-quantized HSV round-trip color before any
+                                -- interaction. Rendering no longer notifies; only
+                                -- user-driven paths (pad/hue drag, presets, :Set) do.
+                                local function render()
                                         obj.Color = Color3.fromHSV(h, s, v)
                                         swatch.BackgroundColor3 = obj.Color
                                         preview.BackgroundColor3 = obj.Color
@@ -4008,9 +4781,12 @@ function Library:CreateWindow(cfg)
                                         hueKnob.Position = UDim2.new(h, 0, 0.5, 0)
                                         local r2, g2, b2 = math.floor(obj.Color.R * 255 + 0.5), math.floor(obj.Color.G * 255 + 0.5), math.floor(obj.Color.B * 255 + 0.5)
                                         hexLbl.Text = string.format("#%02X%02X%02X", r2, g2, b2)
-                                        if callback then pcall(callback, obj.Color) end
                                         end
-                                update()
+                                local function update()
+                                        render()
+                                        if callback then pcall(callback, obj.Color) end
+                                end
+                                render()
 
                                 -- Optional presets provide fast, predictable choices
                                 -- without making users hunt through the HSV surface.
@@ -5103,7 +5879,7 @@ function Library:CreateWindow(cfg)
                                 obj.CurrentValue = tostring(nextValue or "")
                                 box.Text = obj.CurrentValue
                                 local valid, reason = validate(obj.CurrentValue)
-                                obj.Error = valid and nil or reason
+                                obj.Error = (not valid) and reason or nil  -- [FIX v4.0] was `valid and nil or reason`, which always yielded `reason`
                                 render()
                                 if not silent and acfg.Callback then
                                         pcall(acfg.Callback, obj.CurrentValue, obj)
@@ -5140,7 +5916,7 @@ function Library:CreateWindow(cfg)
                                 if obj.Disabled then return end
                                 obj.CurrentValue = box.Text
                                 local valid, reason = validate(obj.CurrentValue)
-                                obj.Error = valid and nil or reason
+                                obj.Error = (not valid) and reason or nil  -- [FIX v4.0] was `valid and nil or reason`, which always yielded `reason`
                                 render()
                                 if acfg.Callback then pcall(acfg.Callback, obj.CurrentValue, obj) end
                         end))
@@ -5359,12 +6135,25 @@ function Library:CreateWindow(cfg)
                                 local item = count > 0 and obj.Items[obj.Index] or nil
                                 local headline, copy = readItem(item)
                                 if animated then
+                                        -- [FIX v4.0] The immediate fade-in below used to cancel
+                                        -- this fade-out (the tween manager replaces same-property
+                                        -- tweens), so animated slide changes never actually
+                                        -- faded. Sequence them instead.
                                         Tween(title, T10, { TextTransparency = 1 })
                                         Tween(bodyText, T10, { TextTransparency = 1 })
+                                        title.Text = count > 0 and headline or (ccfg.EmptyText or "No slides")
+                                        bodyText.Text = count > 0 and copy or "Add items with :SetItems()."
+                                        counter.Text = count > 0 and string.format("%d / %d", obj.Index, count) or "0 / 0"
+                                        task.delay(0.11, function()
+                                                if not title.Parent then return end
+                                                Tween(title, T20, { TextColor3 = C.text, TextTransparency = 0 })
+                                                Tween(bodyText, T20, { TextColor3 = C.textDim, TextTransparency = 0 })
+                                        end)
+                                else
+                                        title.Text = count > 0 and headline or (ccfg.EmptyText or "No slides")
+                                        bodyText.Text = count > 0 and copy or "Add items with :SetItems()."
+                                        counter.Text = count > 0 and string.format("%d / %d", obj.Index, count) or "0 / 0"
                                 end
-                                title.Text = count > 0 and headline or (ccfg.EmptyText or "No slides")
-                                bodyText.Text = count > 0 and copy or "Add items with :SetItems()."
-                                counter.Text = count > 0 and string.format("%d / %d", obj.Index, count) or "0 / 0"
                                 previous.Visible = count > 1
                                 nextButton.Visible = count > 1
                                 Tween(holder, T20, { BackgroundColor3 = C.panel })
@@ -5373,8 +6162,10 @@ function Library:CreateWindow(cfg)
                                 Tween(nextButton, T20, { BackgroundColor3 = C.panelAlt, TextColor3 = C.accentHi })
                                 Tween(previousStroke, T20, { Color = C.border })
                                 if nextStroke then Tween(nextStroke, T20, { Color = C.border }) end
-                                Tween(title, T20, { TextColor3 = C.text, TextTransparency = 0 })
-                                Tween(bodyText, T20, { TextColor3 = C.textDim, TextTransparency = 0 })
+                                if not animated then
+                                        Tween(title, T20, { TextColor3 = C.text, TextTransparency = 0 })
+                                        Tween(bodyText, T20, { TextColor3 = C.textDim, TextTransparency = 0 })
+                                end
                                 Tween(counter, T20, { TextColor3 = C.muted })
                         end
                         function obj:SetIndex(index, silent)
@@ -5772,11 +6563,11 @@ function Library:CreateWindow(cfg)
                 WIN_W, WIN_H = newW, newH
                 if minimized then
                         frame.Size = UDim2.new(0, newW, 0, HEADER_H)
-                        shadow.Size = UDim2.new(0, newW + 16, 0, HEADER_H + 16)
+                        applyShadowBox(newW, HEADER_H)
                 else
                         frame.Size = UDim2.new(0, newW, 0, newH)
                         body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
-                        shadow.Size = UDim2.new(0, newW + 16, 0, newH + 16)
+                        applyShadowBox(newW, newH)
                 end
                 ambientGlow.Size = UDim2.new(0, newW + 70, 0, (minimized and HEADER_H or newH) + 70)
                 updateScale()
@@ -6225,11 +7016,14 @@ function Library:CreateWindow(cfg)
         end
 
         WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
-                if gp then return end
+                -- [FIX v4.0] Escape must reach the palette even when its TextBox is
+                -- focused: with focus, Escape arrives game-processed (menu), so the
+                -- old `if gp then return end` gate ran first and made Escape dead.
                 if inp.KeyCode == Enum.KeyCode.Escape and commandOverlay then
                         closeCommandPalette()
                         return
                 end
+                if gp then return end
                 if UserInputService:GetFocusedTextBox() then return end
                 local commandPressed = UserInputService:IsKeyDown(Enum.KeyCode.LeftControl)
                         or UserInputService:IsKeyDown(Enum.KeyCode.RightControl)
@@ -6274,6 +7068,7 @@ function Library:CreateWindow(cfg)
                 closeCommandPalette()
                 closeModal()
                 finishDrag("destroyed")
+                if Window._flushConfig then pcall(Window._flushConfig) end
                 WindowJanitor:Cleanup()
                 for index = #Library._windows, 1, -1 do
                         if Library._windows[index] == Window then
@@ -6282,6 +7077,473 @@ function Library:CreateWindow(cfg)
                 end
                 if Library._lastWindow == Window then
                         Library._lastWindow = Library._windows[#Library._windows]
+                end
+        end
+
+        -- ============================================================
+        -- [v4.0] CONFIGURATION AUTO-SAVE — Rayfield-style persistence,
+        -- hardened: saves only when values actually CHANGED (signature
+        -- diffing instead of blind rewrites), isolates flags per window,
+        -- and never touches the filesystem unless the developer opts in.
+        --
+        --   ConfigurationSaving = {
+        --       Enabled   = true,
+        --       FolderName = "MyHub",          -- default RezurXLib/Configurations
+        --       FileName  = "Big Hub",         -- default game.PlaceId
+        --       Autosave  = true,              -- signature diff every 2s (default)
+        --       SaveOnUnload = true,           -- flush on :Destroy() (default)
+        --       Notify    = true,              -- toast after a successful load
+        --   }
+        -- ============================================================
+        do
+                local cs = type(cfg.ConfigurationSaving) == "table" and cfg.ConfigurationSaving or nil
+                if cs and cs.Enabled == true then
+                        local folder = tostring(cs.FolderName or "RezurXLib/Configurations")
+                        local fileBase = tostring(cs.FileName or tostring(game.PlaceId))
+                        local path = folder .. "/" .. fileBase .. ".rezx"
+                        local autosave = cs.Autosave ~= false
+                        local saveOnUnload = cs.SaveOnUnload ~= false
+                        local notifyLoaded = cs.Notify ~= false
+
+                        local function stringifyValue(v)
+                                if typeof(v) == "Color3" then
+                                        return string.format("c%.3f,%.3f,%.3f", v.R, v.G, v.B)
+                                elseif type(v) == "table" then
+                                        local parts = {}
+                                        for k2, v2 in pairs(v) do
+                                                table.insert(parts, tostring(k2) .. "=" .. stringifyValue(v2))
+                                        end
+                                        table.sort(parts)
+                                        return "{" .. table.concat(parts, ";") .. "}"
+                                end
+                                return tostring(v)
+                        end
+
+                        local lastSignature = nil
+                        local function signature()
+                                local parts = {}
+                                for flag, obj in pairs(Window.Flags) do
+                                        local v
+                                        if obj.CurrentValue ~= nil then v = "v" .. stringifyValue(obj.CurrentValue)
+                                        elseif obj.Color ~= nil then v = "c" .. stringifyValue(obj.Color)
+                                        elseif obj.CurrentKeybind ~= nil then v = "k" .. tostring(obj.CurrentKeybind)
+                                        elseif obj.CurrentOption ~= nil then v = "o" .. stringifyValue(obj.CurrentOption)
+                                        else v = "-" end
+                                        table.insert(parts, tostring(flag) .. ":" .. v)
+                                end
+                                table.sort(parts)
+                                return table.concat(parts, "|")
+                        end
+
+                        local function snapshot()
+                                local data = {}
+                                for flag, obj in pairs(Window.Flags) do
+                                        if obj.CurrentValue ~= nil then
+                                                data[flag] = obj.CurrentValue
+                                        elseif obj.Color ~= nil then
+                                                data[flag] = { R = obj.Color.R, G = obj.Color.G, B = obj.Color.B }
+                                        elseif obj.CurrentKeybind ~= nil then
+                                                data[flag] = keyName(obj.CurrentKeybind)
+                                        elseif obj.CurrentOption ~= nil then
+                                                data[flag] = obj.CurrentOption
+                                        end
+                                end
+                                return data
+                        end
+
+                        --- Write this window's flagged values to disk (JSON).
+                        function Window:SaveConfiguration()
+                                if not FS.available then return nil end
+                                FS.ensureFolder(folder)
+                                local data = snapshot()
+                                local ok, encoded = pcall(function() return HttpService:JSONEncode(data) end)
+                                if not ok or type(encoded) ~= "string" then
+                                        warn("[RezurXLib] SaveConfiguration: JSON encode failed")
+                                        return nil
+                                end
+                                local wrote = FS.write(path, encoded)
+                                if not wrote then
+                                        warn("[RezurXLib] SaveConfiguration: write failed for " .. path)
+                                end
+                                lastSignature = signature()
+                                return data
+                        end
+
+                        --- Read this window's saved values and replay them
+                        --- onto their elements. Returns appliedCount.
+                        function Window:LoadConfiguration()
+                                if not FS.available then return 0 end
+                                if not FS.exists(path) then return 0 end
+                                local ok, raw = FS.read(path)
+                                if not ok or type(raw) ~= "string" then return 0 end
+                                local okDecode, data = pcall(function() return HttpService:JSONDecode(raw) end)
+                                if not okDecode or type(data) ~= "table" then
+                                        warn("[RezurXLib] LoadConfiguration: corrupt file " .. path)
+                                        return 0
+                                end
+                                local applied = 0
+                                for flag, value in pairs(data) do
+                                        local obj = Window.Flags[flag]
+                                        if obj and obj.Set then
+                                                local okApply = pcall(function()
+                                                        if type(value) == "table" and value.R ~= nil then
+                                                                obj:Set(Color3.new(value.R, value.G, value.B))
+                                                        elseif type(value) == "string" and value:match("^%u[%u%d]+$") then
+                                                                local okKey, keyCode = pcall(function() return Enum.KeyCode[value] end)
+                                                                if okKey and keyCode then obj:Set(keyCode) end
+                                                        else
+                                                                obj:Set(value)
+                                                        end
+                                                end)
+                                                if okApply then applied = applied + 1 end
+                                        end
+                                end
+                                lastSignature = signature()
+                                return applied
+                        end
+
+                        -- Initial load: elements are created synchronously right
+                        -- after CreateWindow in the common case, so a short defer
+                        -- is enough for them to register their flags. When the
+                        -- key gate is active, loading waits until the gate is
+                        -- passed so callbacks never replay behind a locked UI.
+                        task.delay(0.35, function()
+                                while (not frame.Visible) and screenGui.Parent do
+                                        task.wait(0.25)
+                                end
+                                if not screenGui.Parent then return end
+                                local applied = 0
+                                pcall(function() applied = Window:LoadConfiguration() end)
+                                if applied > 0 and notifyLoaded then
+                                        notify("Configuration", applied .. " saved setting" .. (applied > 1 and "s" or "") .. " restored.", 4, "success")
+                                end
+                                if lastSignature == nil then lastSignature = signature() end
+                        end)
+
+                        -- Autosave: diff the signature every 2s; write only on
+                        -- real change (no per-click rewrite storms like Rayfield).
+                        if autosave then
+                                task.spawn(function()
+                                        while screenGui.Parent do
+                                                task.wait(2)
+                                                if not screenGui.Parent then break end
+                                                local okSig, sig = pcall(signature)
+                                                if okSig and lastSignature ~= nil and sig ~= lastSignature then
+                                                        pcall(function() Window:SaveConfiguration() end)
+                                                end
+                                        end
+                                end)
+                        end
+
+                        -- Flush on destroy (and expose for manual flush).
+                        if saveOnUnload then
+                                Window._flushConfig = function()
+                                        if not FS.available then return end
+                                        local okSig, sig = pcall(signature)
+                                        if okSig and lastSignature ~= nil and sig ~= lastSignature then
+                                                pcall(function() Window:SaveConfiguration() end)
+                                        end
+                                end
+                        end
+                end
+        end
+
+        -- ============================================================
+        -- [v4.0] KEY GATE UI — a styled unlock card in the library's own
+        -- design language (no external asset download, unlike Rayfield's
+        -- prebuilt ScreenGui). The window stays hidden until a valid key
+        -- is entered or a previously saved key matches.
+        --
+        --   KeySystem = true,
+        --   KeySettings = {
+        --       Title = "Untitled", Subtitle = "Key System",
+        --       Note = "How to get a key…",
+        --       FileName = "Key",      -- saved under RezurXLib/Keys/
+        --       SaveKey = true,        -- remember accepted keys (default)
+        --       GrabKeyFromSite = false,
+        --       Key = {"Hello"},       -- string or list
+        --       MaxAttempts = 5,       -- 0 = unlimited
+        --       OnExhausted = "Lock",  -- "Lock" | "Kick" | "None"
+        --   }
+        -- ============================================================
+        do
+                if keyGatePending and keyGateKeys then
+                        local ks = keySettingsRef
+                        frame.Visible = false
+                        setShadowVisible(false)
+                        ambientGlow.Visible = false
+                        if cursorGlowRoot then cursorGlowRoot.Visible = false end
+
+                        local gateJanitor = Janitor.new()
+                        WindowJanitor:Add(function() gateJanitor:Cleanup() end)
+
+                        local dim = Instance.new("TextButton")
+                        dim.Name = "KeyGateDim"
+                        dim.Size = UDim2.fromScale(1, 1)
+                        dim.BackgroundColor3 = Color3.new(0, 0, 0)
+                        dim.BackgroundTransparency = 0.45
+                        dim.BorderSizePixel = 0
+                        dim.Text = ""
+                        dim.AutoButtonColor = false
+                        dim.ZIndex = 30
+                        dim.Parent = overlayGui
+                        gateJanitor:Add(dim, "Destroy")
+
+                        local card = Instance.new("Frame")
+                        card.Name = "KeyGate"
+                        card.Size = UDim2.fromOffset(364, 248)
+                        card.AnchorPoint = Vector2.new(0.5, 0.5)
+                        card.Position = UDim2.fromScale(0.5, 0.5)
+                        card.BackgroundColor3 = C.bg
+                        card.BorderSizePixel = 0
+                        card.ClipsDescendants = true
+                        card.ZIndex = 31
+                        card.Parent = overlayGui
+                        gateJanitor:Add(card, "Destroy")
+                        corner(card, R.outer)
+                        local cardStroke = stroke(card, C.borderAcc, 1.5)
+                        cardStroke.Transparency = 0.45
+
+                        local cardGlow = Instance.new("Frame")
+                        cardGlow.Size = UDim2.new(1, 24, 1, 24)
+                        cardGlow.AnchorPoint = Vector2.new(0.5, 0.5)
+                        cardGlow.Position = UDim2.fromScale(0.5, 0.5)
+                        cardGlow.BackgroundColor3 = C.accent
+                        cardGlow.BackgroundTransparency = 0.93
+                        cardGlow.BorderSizePixel = 0
+                        cardGlow.ZIndex = 30
+                        cardGlow.Parent = overlayGui
+                        gateJanitor:Add(cardGlow, "Destroy")
+                        corner(cardGlow, R.outer + 8)
+
+                        local gateScale = Instance.new("UIScale")
+                        gateScale.Scale = 0.94
+                        gateScale.Parent = card
+                        Tween(gateScale, TweenInfo.new(0.36, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+
+                        local title = Instance.new("TextLabel")
+                        title.Size = UDim2.new(1, -48, 0, 24)
+                        title.Position = UDim2.fromOffset(24, 22)
+                        title.BackgroundTransparency = 1
+                        title.Font = Enum.Font.GothamBold
+                        title.TextSize = 17
+                        title.TextColor3 = C.text
+                        title.TextXAlignment = Enum.TextXAlignment.Left
+                        title.Text = tostring(ks.Title or windowName)
+                        title.ZIndex = 32
+                        title.Parent = card
+
+                        local gateSubtitle = Instance.new("TextLabel")
+                        gateSubtitle.Size = UDim2.new(1, -48, 0, 14)
+                        gateSubtitle.Position = UDim2.fromOffset(24, 47)
+                        gateSubtitle.BackgroundTransparency = 1
+                        gateSubtitle.Font = Enum.Font.GothamMedium
+                        gateSubtitle.TextSize = 10
+                        gateSubtitle.TextColor3 = C.muted
+                        gateSubtitle.TextXAlignment = Enum.TextXAlignment.Left
+                        gateSubtitle.Text = tostring(ks.Subtitle or "Key System")
+                        gateSubtitle.ZIndex = 32
+                        gateSubtitle.Parent = card
+
+                        local note = Instance.new("TextLabel")
+                        note.Size = UDim2.new(1, -48, 0, 40)
+                        note.Position = UDim2.fromOffset(24, 68)
+                        note.BackgroundTransparency = 1
+                        note.Font = Enum.Font.Gotham
+                        note.TextSize = 11
+                        note.TextColor3 = C.textDim
+                        note.TextXAlignment = Enum.TextXAlignment.Left
+                        note.TextYAlignment = Enum.TextYAlignment.Top
+                        note.TextWrapped = true
+                        note.Text = tostring(ks.Note or "No method of obtaining a key is provided.")
+                        note.ZIndex = 32
+                        note.Parent = card
+
+                        local inputBox = Instance.new("TextBox")
+                        inputBox.Size = UDim2.new(1, -48, 0, 40)
+                        inputBox.Position = UDim2.fromOffset(24, 118)
+                        inputBox.BackgroundColor3 = C.panelAlt
+                        inputBox.BorderSizePixel = 0
+                        inputBox.Font = Enum.Font.Gotham
+                        inputBox.TextSize = 13
+                        inputBox.TextColor3 = C.text
+                        inputBox.PlaceholderColor3 = C.muted
+                        inputBox.PlaceholderText = "Enter key…"
+                        inputBox.Text = ""
+                        inputBox.ClearTextOnFocus = false
+                        inputBox.TextXAlignment = Enum.TextXAlignment.Left
+                        inputBox.ClipsDescendants = true
+                        inputBox.ZIndex = 32
+                        inputBox.Parent = card
+                        corner(inputBox, R.control)
+                        local inputStroke = stroke(inputBox, C.border, 1)
+                        pad(inputBox, 0, 0, 12, 12)
+
+                        local attemptsMax = tonumber(ks.MaxAttempts)
+                        if attemptsMax == nil then attemptsMax = 5 end
+                        local attemptsLeft = attemptsMax
+                        local status = Instance.new("TextLabel")
+                        status.Size = UDim2.new(1, -48, 0, 14)
+                        status.Position = UDim2.fromOffset(24, 164)
+                        status.BackgroundTransparency = 1
+                        status.Font = Enum.Font.GothamMedium
+                        status.TextSize = 10
+                        status.TextColor3 = C.muted
+                        status.TextXAlignment = Enum.TextXAlignment.Left
+                        status.Text = attemptsMax > 0 and ("Attempts remaining: " .. attemptsLeft) or "Unlimited attempts"
+                        status.ZIndex = 32
+                        status.Parent = card
+
+                        local submit = Instance.new("TextButton")
+                        submit.Size = UDim2.new(1, -48, 0, 38)
+                        submit.Position = UDim2.fromOffset(24, 190)
+                        submit.BackgroundColor3 = C.accentDark
+                        submit.Text = ""
+                        submit.AutoButtonColor = false
+                        submit.BorderSizePixel = 0
+                        submit.Selectable = true
+                        submit.ZIndex = 32
+                        submit.Parent = card
+                        corner(submit, R.control)
+                        local submitStroke = stroke(submit, C.accentDim, 1)
+                        local submitGrad = gradient(submit, ColorSequence.new{
+                                ColorSequenceKeypoint.new(0.0, C.accentDim),
+                                ColorSequenceKeypoint.new(1.0, C.accentDark),
+                        }, 100)
+                        local submitLbl = Instance.new("TextLabel")
+                        submitLbl.Size = UDim2.fromScale(1, 1)
+                        submitLbl.BackgroundTransparency = 1
+                        submitLbl.Font = Enum.Font.GothamBold
+                        submitLbl.TextSize = 13
+                        submitLbl.TextColor3 = C.accentHi
+                        submitLbl.Text = "Unlock"
+                        submitLbl.ZIndex = 33
+                        submitLbl.Parent = submit
+
+                        local gateResolved = false
+                        local function shakeCard()
+                                Tween(card, TweenInfo.new(0.09, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+                                        { Position = UDim2.new(0.5, -7, 0.5, 0) })
+                                task.delay(0.09, function()
+                                        Tween(card, TweenInfo.new(0.09, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+                                                { Position = UDim2.new(0.5, 7, 0.5, 0) })
+                                end)
+                                task.delay(0.18, function()
+                                        Tween(card, TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out),
+                                                { Position = UDim2.fromScale(0.5, 0.5) })
+                                end)
+                        end
+
+                        local function resolveGate(matchedKey)
+                                if gateResolved then return end
+                                gateResolved = true
+                                if ks.SaveKey ~= false and matchedKey and FS.available then
+                                        FS.ensureFolder("RezurXLib/Keys")
+                                        local keyFile = "RezurXLib/Keys/" .. tostring(ks.FileName or "Key") .. ".rezx"
+                                        FS.write(keyFile, matchedKey)
+                                end
+                                task.spawn(function()
+                                        pcall(function()
+                                                Tween(card, T20, { BackgroundTransparency = 1 })
+                                                Tween(cardStroke, T20, { Transparency = 1 })
+                                                Tween(cardGlow, T20, { BackgroundTransparency = 1 })
+                                                Tween(dim, T20, { BackgroundTransparency = 1 })
+                                                for _, child in ipairs(card:GetChildren()) do
+                                                        if child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton") then
+                                                                if child:IsA("TextLabel") or child:IsA("TextBox") then
+                                                                        Tween(child, T20, { TextTransparency = 1 })
+                                                                end
+                                                                Tween(child, T20, { BackgroundTransparency = 1 })
+                                                        end
+                                                end
+                                                task.wait(0.22)
+                                        end)
+                                        gateJanitor:Cleanup()
+                                        frame.Visible = true
+                                        setShadowVisible(true)
+                                        ambientGlow.Visible = true
+                                        task.spawn(runEntrance)
+                                        if ks.SaveKey ~= false and matchedKey then
+                                                notify("Key System", "Your key has been saved for next time.", 4, "success")
+                                        end
+                                end)
+                        end
+
+                        local locked = false
+                        local function tryKey()
+                                if gateResolved or locked then return end
+                                local entered = inputBox.Text
+                                if entered == "" then return end
+                                local matched = nil
+                                for _, k in ipairs(keyGateKeys) do
+                                        if entered == k then matched = k break end
+                                end
+                                if matched then
+                                        resolveGate(matched)
+                                else
+                                        inputBox.Text = ""
+                                        shakeCard()
+                                        Tween(inputStroke, T10, { Color = C.red, Thickness = 1.5 })
+                                        task.delay(0.6, function()
+                                                Tween(inputStroke, T10, { Color = C.border, Thickness = 1 })
+                                        end)
+                                        if attemptsMax > 0 then
+                                                attemptsLeft = attemptsLeft - 1
+                                                status.Text = "Attempts remaining: " .. math.max(attemptsLeft, 0)
+                                                status.TextColor3 = attemptsLeft <= 1 and C.red or C.yellow
+                                                if attemptsLeft <= 0 then
+                                                        local mode = tostring(ks.OnExhausted or "Lock")
+                                                        if mode == "Kick" then
+                                                                if player then player:Kick("No attempts remaining.") end
+                                                        elseif mode == "None" then
+                                                                attemptsLeft = attemptsMax
+                                                                status.Text = "Attempts remaining: " .. attemptsLeft
+                                                                status.TextColor3 = C.muted
+                                                        else
+                                                                locked = true
+                                                                inputBox.TextEditable = false
+                                                                inputBox.Text = ""
+                                                                inputBox.PlaceholderText = "Locked"
+                                                                submitLbl.Text = "Locked"
+                                                                status.Text = "No attempts remaining. Rejoin to try again."
+                                                                status.TextColor3 = C.red
+                                                        end
+                                                end
+                                        end
+                                end
+                        end
+
+                        submit.Activated:Connect(tryKey)
+                        inputBox.FocusLost:Connect(function(enterPressed)
+                                if enterPressed then tryKey() end
+                        end)
+                        submit.MouseEnter:Connect(function()
+                                Tween(submit, T10, { BackgroundColor3 = C.accentDim })
+                        end)
+                        submit.MouseLeave:Connect(function()
+                                Tween(submit, T10, { BackgroundColor3 = C.accentDark })
+                        end)
+                        task.defer(function()
+                                if inputBox.Parent and inputBox.Visible then inputBox:CaptureFocus() end
+                        end)
+                        onTheme(function()
+                                if card.Parent then
+                                        Tween(card, T20, { BackgroundColor3 = C.bg })
+                                        Tween(cardStroke, T20, { Color = C.borderAcc })
+                                        Tween(cardGlow, T20, { BackgroundColor3 = C.accent })
+                                        Tween(title, T20, { TextColor3 = C.text })
+                                        Tween(gateSubtitle, T20, { TextColor3 = C.muted })
+                                        Tween(note, T20, { TextColor3 = C.textDim })
+                                        Tween(inputBox, T20, { BackgroundColor3 = C.panelAlt })
+                                        Tween(submit, T20, { BackgroundColor3 = C.accentDark })
+                                        Tween(submitStroke, T20, { Color = C.accentDim })
+                                        Tween(submitLbl, T20, { TextColor3 = C.accentHi })
+                                        submitGrad.Color = ColorSequence.new{
+                                                ColorSequenceKeypoint.new(0.0, C.accentDim),
+                                                ColorSequenceKeypoint.new(1.0, C.accentDark),
+                                        }
+                                end
+                        end)
                 end
         end
 
@@ -6374,7 +7636,11 @@ function Library:SetReducedMotion(nextValue)
 end
 
 function Library:Destroy()
-        for _, w in ipairs(Library._windows) do
+        -- [FIX v4.0] Iterate BACKWARDS (or over a snapshot): w:Destroy()
+        -- removes each window from _windows mid-ipairs, which used to skip
+        -- every second window and leak its connections + ScreenGui.
+        for i = #Library._windows, 1, -1 do
+                local w = Library._windows[i]
                 pcall(function() w:Destroy() end)
         end
         table.clear(Library._windows)
@@ -6496,7 +7762,9 @@ function Library:GetDocs()
                         { Name = "CreateTextArea", Params = "Title, Text, Placeholder, Callback, Flag", Returns = ":Set, :Get, :Reset", Description = "Multi-line input." },
                 },
                 Window = {
-                        { Name = "CreateTab", Params = "name, optional icon", Returns = "Tab (:SetTitle, :SetIcon)", Description = "Text-labelled tab with a measured, horizontally scrolling rail." },
+                        { Name = "CreateTab", Params = "name, optional icon (emoji text or asset id/URI)", Returns = "Tab (:SetTitle, :SetIcon)", Description = "Tab with a measured, horizontally scrolling rail; icons may be emoji text or image assets." },
+                        { Name = "SaveConfiguration", Params = "", Returns = "table", Description = "With ConfigurationSaving enabled: write this window's flagged values to disk (JSON)." },
+                        { Name = "LoadConfiguration", Params = "", Returns = "appliedCount", Description = "With ConfigurationSaving enabled: read and replay saved values onto elements." },
                         { Name = "SetBrandText", Params = "text (up to four UTF-8 characters)", Returns = "applied text", Description = "Sets the compact header badge; emoji and symbols are preserved." },
                         { Name = "GetBrandText", Params = "", Returns = "text", Description = "Gets the current compact header badge text." },
                         { Name = "SetRestoreText", Params = "text (up to four UTF-8 characters)", Returns = "applied text", Description = "Sets the floating restore button shown after Close." },
@@ -6509,13 +7777,20 @@ function Library:GetDocs()
                         { Name = "OpenCommandPalette", Params = "", Returns = "overlay" },
                 },
                 Library = {
-                        { Name = "CreateWindow", Params = "Name, Theme, Size, Host, Parent, Accessibility", Returns = "Window" },
+                        { Name = "CreateWindow", Params = "Name, Theme, Size, Host, Parent, Accessibility, Icon, KeySystem, KeySettings, ConfigurationSaving", Returns = "Window" },
                         { Name = "RegisterTheme", Params = "name, palette", Returns = "palette" },
                         { Name = "RegisterImage", Params = "key, imageId", Returns = "string" },
                         { Name = "SaveConfiguration", Params = "", Returns = "table" },
                         { Name = "LoadConfiguration", Params = "table", Returns = "nil" },
                         { Name = "GetDocs", Params = "", Returns = "table" },
                         { Name = "SetReducedMotion", Params = "boolean", Returns = "boolean" },
+                },
+                New = {
+                        { Name = "Icon Support", Params = "Window Icon / tab icon / element Icon: number asset id, rbxassetid:// URI, or emoji text", Returns = "", Description = "Rayfield-style asset icons on the topbar badge, tabs, and every core element — with emoji fallback, no remote icon atlas required." },
+                        { Name = "ConfigurationSaving", Params = "Enabled, FolderName, FileName, Autosave, SaveOnUnload, Notify", Returns = "", Description = "Auto-saves flagged elements to JSON on the executor filesystem. Signature-diffed writes (no rewrite storms), per-window isolation, load-replay on boot, flush on destroy." },
+                        { Name = "KeySystem", Params = "KeySettings = Title, Subtitle, Note, FileName, SaveKey, GrabKeyFromSite, Key, MaxAttempts, OnExhausted", Returns = "", Description = "Styled key gate shown before the window. Exact-match validation, elastic shake on wrong keys, saved-key skip, optional HTTP key fetch, Lock/Kick/None on exhaustion." },
+                        { Name = "Cursor Glow", Params = "CursorGlow = true (desktop default)", Returns = "", Description = "Accent ambient light under the pointer; brightens on press, breathes at idle." },
+                        { Name = "Glass + Glow visuals", Params = "AnimatedAccents = true (default)", Returns = "", Description = "Layered depth shadows, frosted-glass card sheens, animated gradient header with shimmer sweep, spring entrance, and staggered tab-open animations." },
                 },
         }
 end

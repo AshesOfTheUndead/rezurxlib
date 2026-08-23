@@ -60,8 +60,8 @@ local TMIN   = TweenInfo.new(0.32, Enum.EasingStyle.Quint,       Enum.EasingDire
 local TTAB   = TweenInfo.new(0.34, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
 local TPRESS = TweenInfo.new(0.09, Enum.EasingStyle.Quad,        Enum.EasingDirection.Out)
 local TPOP   = TweenInfo.new(0.24, Enum.EasingStyle.Back,        Enum.EasingDirection.Out)
-local TTOGGLE = TweenInfo.new(0.45, Enum.EasingStyle.Quart,      Enum.EasingDirection.Out)
-local TTOGGLEBG = TweenInfo.new(0.80, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)
+local TTOGGLE = TweenInfo.new(0.26, Enum.EasingStyle.Quart,      Enum.EasingDirection.Out)   -- [v4.1.0] 0.45 → 0.26s: snappy, still smooth
+local TTOGGLEBG = TweenInfo.new(0.30, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out)  -- [v4.1.0] 0.80 → 0.30s: track no longer lags the knob
 
 -- ============================================================
 -- SHARED CORNER RADII
@@ -659,7 +659,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "4.0.1"
+Library.Version = "4.1.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -1510,12 +1510,26 @@ function Library:CreateWindow(cfg)
         end)
 
         local fpsAvg = 60
-        if showStats then WindowJanitor:Add(RunService.Heartbeat:Connect(function(dt)
-                fpsAvg = fpsAvg * 0.88 + (1 / math.max(dt, 0.001)) * 0.12
-                local avg = math.floor(fpsAvg + 0.5)
-                fpsLabel.Text = avg .. " FPS"
-                fpsLabel.TextColor3 = avg >= 55 and C.green or avg >= 30 and C.yellow or C.red
-        end)) end
+        if showStats then
+                -- [v4.1.0 PERF] Writing fpsLabel.Text EVERY frame forced a full
+                -- text re-layout ~60x/s — a measurable frame cost on low-end
+                -- devices for a chip nobody reads at 60Hz. The EMA still
+                -- integrates every frame (accuracy), but the label only
+                -- repaints at 4Hz and only when the rounded value changed.
+                local lastShownFps = -1
+                local fpsAccum = 0
+                WindowJanitor:Add(RunService.Heartbeat:Connect(function(dt)
+                        fpsAvg = fpsAvg * 0.88 + (1 / math.max(dt, 0.001)) * 0.12
+                        fpsAccum = fpsAccum + dt
+                        if fpsAccum < 0.25 then return end
+                        fpsAccum = 0
+                        local avg = math.floor(fpsAvg + 0.5)
+                        if avg == lastShownFps then return end
+                        lastShownFps = avg
+                        fpsLabel.Text = avg .. " FPS"
+                        fpsLabel.TextColor3 = avg >= 55 and C.green or avg >= 30 and C.yellow or C.red
+                end))
+        end
         if showStats then task.spawn(function()
                 while screenGui.Parent do
                         local ok, ms = pcall(function()
@@ -2304,7 +2318,9 @@ function Library:CreateWindow(cfg)
                 prog.Parent = n
 
                 Tween(n, T20, { BackgroundTransparency = 0.05 })
-                Tween(n, TweenInfo.new(0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+                -- [v4.1.0] Entrance: slide in from the right edge with a soft
+                -- overshoot settle — reads as "arriving" rather than growing.
+                Tween(n, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
                         Size = UDim2.new(1, 0, 0, notificationHeight),
                         Position = UDim2.new(0, 0, 0, 0),
                 })
@@ -3192,6 +3208,26 @@ function Library:CreateWindow(cfg)
                                 Tween(strk, T20, { Color = primary and C.accentDim or C.border })
                                 Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted, Position = UDim2.new(1, -22, 0, 0) })
                         end)
+                        local btnPressScale = Instance.new("UIScale")
+                        btnPressScale.Name = "_PressScale"
+                        btnPressScale.Scale = 1
+                        btnPressScale.Parent = b
+                        -- [v4.1.0] Micro press-feedback: a 3% dip on press with a
+                        -- quick Quint return gives buttons a physical, snappy feel
+                        -- without any layout shift (UIScale only).
+                        b.MouseButton1Down:Connect(function()
+                                Tween(btnPressScale, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                        { Scale = 0.97 })
+                        end)
+                        b.MouseButton1Up:Connect(function()
+                                Tween(btnPressScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                        { Scale = 1 })
+                        end)
+                        b.MouseLeave:Connect(function()
+                                Tween(btnPressScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                        { Scale = 1 })
+                        end)
+
                         b.Activated:Connect(function()
                                 ripple(b, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
                                 Tween(b, T20, { BackgroundColor3 = C.accentDim })
@@ -4424,6 +4460,18 @@ function Library:CreateWindow(cfg)
                                 panel.Parent = overlayGui
                                 corner(panel, R.panel)
                                 stroke(panel, C.accent, 1.5)
+                                -- [v4.1.0] Entrance: the picker settles from a 4%
+                                -- scale anchored on the swatch it opened from.
+                                do
+                                        panel.AnchorPoint = Vector2.new(0.5, 0.5)
+                                        panel.Position = UDim2.new(0, px + 135, 0, py + panelHeight / 2)
+                                        local enterScale = Instance.new("UIScale")
+                                        enterScale.Name = "_EnterScale"
+                                        enterScale.Scale = 0.94
+                                        enterScale.Parent = panel
+                                        Tween(enterScale, TweenInfo.new(0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                                { Scale = 1 })
+                                end
 
                                 local pTtl = Instance.new("TextLabel")
                                 pTtl.Size = UDim2.new(1, -72, 0, 20)
@@ -6068,6 +6116,17 @@ function Library:CreateWindow(cfg)
                                 popup.ScrollBarThickness = 3
                                 popup.ScrollBarImageColor3 = C.accent
                                 popup.CanvasSize = UDim2.fromOffset(0, popupContentHeight)
+                                -- [v4.1.0] Entrance: the menu unfolds from its
+                                -- trigger button — height expands top-anchored.
+                                do
+                                        popup.AnchorPoint = Vector2.new(0, 0)
+                                        local menuScale = Instance.new("UIScale")
+                                        menuScale.Name = "_EnterScale"
+                                        menuScale.Scale = 0.95
+                                        menuScale.Parent = popup
+                                        Tween(menuScale, TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                                { Scale = 1 })
+                                end
                                 popup.ZIndex = 31
                                 popup.Parent = overlayGui
                                 corner(popup, R.panel)
@@ -6476,6 +6535,19 @@ function Library:CreateWindow(cfg)
                 palette.Parent = overlay
                 corner(palette, R.panel)
                 local paletteStroke = stroke(palette, C.borderAcc, 1)
+                -- [v4.1.0] Entrance: scrim fades while the palette drops in
+                -- from slightly above with a soft settle.
+                do
+                        local enterScale = Instance.new("UIScale")
+                        enterScale.Name = "_EnterScale"
+                        enterScale.Scale = 0.97
+                        enterScale.Parent = palette
+                        overlay.BackgroundTransparency = 1
+                        Tween(overlay, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                { BackgroundTransparency = 0.38 })
+                        Tween(enterScale, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                { Scale = 1 })
+                end
 
                 local prompt = Instance.new("TextLabel")
                 prompt.Size = UDim2.new(1, -28, 0, 18)
@@ -6692,6 +6764,21 @@ function Library:CreateWindow(cfg)
                 confirm.Text = tostring(mcfg.ConfirmText or "Confirm")
                 confirm.Parent = panel
                 local confirmStroke = confirm:FindFirstChildOfClass("UIStroke")
+
+                -- [v4.1.0] Entrance: the scrim fades in while the card settles
+                -- from a 4% scale. Fast (0.18s) so it never blocks interaction,
+                -- soft enough to feel weighty.
+                do
+                        local enterScale = Instance.new("UIScale")
+                        enterScale.Name = "_EnterScale"
+                        enterScale.Scale = 0.96
+                        enterScale.Parent = panel
+                        overlay.BackgroundTransparency = 1
+                        Tween(overlay, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                { BackgroundTransparency = 0.42 })
+                        Tween(enterScale, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                { Scale = 1 })
+                end
 
                 local obj = { Closed = false }
                 local function close(reason)

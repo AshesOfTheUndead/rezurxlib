@@ -1,4 +1,4 @@
-# 👑 RezurXLib v4.0.1 "Aurora"
+# 👑 RezurXLib v4.1.0 "Aurora"
 
 **A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
@@ -19,6 +19,8 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 - **Subtle accent rim** — a faint accent-tinted glow hugs the window edge for branded presence
 - **Spring entrance** — the window materializes with a gentle scale-and-fade
 - **Staggered tab openings** — cards settle softly in sequence when you switch tabs
+- **Choreographed entrances everywhere** — modals, color pickers, context menus, and the command palette now scale-settle in instead of popping (v4.1.0)
+- **Button micro press-feedback** — buttons dip 3% on press and spring back (v4.1.0)
 
 All of it respects `ReducedMotion` and `MotionScale`. Ambient pulse loops (logo glow, glow-strip shimmer) are opt-in via `AnimatedAccents = true`.
 
@@ -101,6 +103,8 @@ Including two critical ones that explain the most common "ghost UI" reports:
 | **Modals** | Confirmation dialogs |
 | **Key Gate** | Styled key system with attempt tracking |
 
+**Snappy interactions** — 0.26s toggles, instant-feeling hover states, and a 4Hz-capped stats chip so the header never costs you frames
+
 **7 built-in themes** — Ember, Ocean, Crimson, Slate, Midnight, Forest, Coral, Quiet — plus `Library:RegisterTheme()` for your own.
 
 ---
@@ -110,7 +114,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 - **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
 - **Error-handled** — every callback wrapped in `pcall`
 - **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 82 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows)
+- **Headless-tested** — 92 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
 - **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
 - **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
 

@@ -1,5 +1,44 @@
 # Changelog
 
+## v4.1.0 — Smoothness & Final Polish
+
+The final pass: one real performance fix, snappier interactions, and entrance
+animations for every surface that used to pop in instantly. 92/92 tests.
+
+### Performance
+- **FPS label repaint throttled to 4Hz** (was every frame): writing
+  `fpsLabel.Text` 60+ times per second forced a full text re-layout each
+  frame — a measurable cost on low-end devices for a chip nobody reads at
+  60Hz. The EMA still integrates every frame, so the number stays accurate;
+  it just repaints at most 4x per second and only when the rounded value
+  changed. In tests: ~120 text writes over 120 frames dropped to <= 8.
+
+### Snappier interactions
+- **Toggle timing**: knob 0.45s → 0.26s, track 0.80s → 0.30s. The switch now
+  completes before your finger leaves it; the track no longer lags behind
+  the knob.
+- **Button micro press-feedback**: buttons dip to 97% scale on press and
+  spring back with a Quint ease on release (0.06s in / 0.16s back) — a
+  physical, snappy feel with zero layout shift (UIScale only).
+
+### Entrances (previously instant → now choreographed)
+- **Modal dialog**: scrim fades in (0.18s) while the card settles from 96%
+  scale with a soft Back ease.
+- **Color picker popup**: springs from 94% scale, anchored on the swatch it
+  opened from.
+- **Context menu**: unfolds from its trigger button at 95% scale.
+- **Command palette**: scrim fade + a 97%-scale drop-in settle.
+- **Notification**: entrance refined (0.3s Back) so the toast reads as
+  arriving rather than growing.
+
+### Verified
+- New tests: FPS throttle write-count, press-scale dip/restore, modal
+  entrance end-state, picker entrance, toggle timing regression, plus a fix
+  to the test harness's signal Disconnect mock.
+- Full suite: **92/92 passing**.
+
+---
+
 ## v4.0.1 — Feedback Pass on the Visual Direction
 
 User feedback on v4.0.0: the cursor glow was weird, the frosted-glass card

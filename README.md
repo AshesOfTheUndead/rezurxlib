@@ -1,4 +1,4 @@
-# 👑 RezurXLib v4.2.0 "Aurora"
+# 👑 RezurXLib v4.3.0 "Aurora"
 
 **A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
@@ -13,6 +13,12 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 ---
 
 ## ✨ What's New in v4.0 "Aurora"
+
+### 🌶️ Spice (v4.3.0)
+- **Active tab = accent fill** — the selected tab is a solid accent chip with white bold text, exactly as requested
+- **Signature accent spines** — a 3px accent bar on every button that lights up and grows on hover
+- **Hover raises** — buttons lift 1.5% on hover; the chevron slides and turns accent
+- **Section headers with hierarchy** — accent tick + gradient rule from every title
 
 ### 🎰 The Jackpot Entrance (v4.2.0)
 - **Spring landing** — the window pops in with a Back overshoot; it *lands*, not fades
@@ -122,7 +128,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 - **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
 - **Error-handled** — every callback wrapped in `pcall`
 - **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 106 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
+- **Headless-tested** — 120 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
 - **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
 - **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
 

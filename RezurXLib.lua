@@ -672,7 +672,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "4.2.0"
+Library.Version = "4.3.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -2732,6 +2732,14 @@ function Library:CreateWindow(cfg)
                 btn.Parent = tabRail
                 corner(btn, R.tab)
                 local chipStroke = stroke(btn, C.borderAcc, 1)
+                -- [v4.3.0] ACTIVE TAB = SOLID ACCENT FILL. The gradient stays a
+                -- white identity (no tint) so the chip renders EXACTLY its
+                -- BackgroundColor3 — UIGradient.Color multiplies with the bg
+                -- color, so encoding the fill in the gradient would double-darken.
+                local chipGrad = gradient(btn, ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.white),
+                        ColorSequenceKeypoint.new(1.0, C.white),
+                }, 90)
                 -- Render tab text in a dedicated label. This is deliberately
                 -- separate from the button hit target so labels remain visible
                 -- on every client renderer and never compete with input.
@@ -2847,12 +2855,17 @@ function Library:CreateWindow(cfg)
                                 Tween(prev.Btn, T20, { BackgroundColor3 = C.tabChip })
                                 Tween(prev._chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
                                 Tween(prev._textLbl, T20, { TextColor3 = C.text })
+                                prev._textLbl.Font = Enum.Font.GothamMedium
                         end
                         ActiveTab = tab
                         tab.Page.Visible = true
-                        Tween(btn, T20, { BackgroundTransparency = 1 })
-                        Tween(chipStroke, T20, { Transparency = 1 })
-                        Tween(textLbl, T20, { TextColor3 = C.accentHi })
+                        -- [v4.3.0] ACTIVE TAB = ACCENT FILL: the selected tab is a
+                        -- solid accent chip with white bold text — unmistakable,
+                        -- exactly as requested. Inactive tabs stay quiet chips.
+                        Tween(btn, T20, { BackgroundColor3 = C.accent })
+                        Tween(chipStroke, T20, { Color = C.accentHi, Transparency = 0.15 })
+                        Tween(textLbl, T20, { TextColor3 = C.white })
+                        textLbl.Font = Enum.Font.GothamBold
                         moveIndicatorTo(btn, not skipAnim)
                         -- CARD CASCADE (v4.2.0 "dopamine" pop): every card pops
                         -- in with a Back overshoot AND its stroke flashes the
@@ -2906,15 +2919,18 @@ function Library:CreateWindow(cfg)
                 end
                 tab._chipStroke = chipStroke
                 tab._textLbl = textLbl
+                tab._chipGrad = chipGrad
                 tab._setActive = setActive
 
                 onTheme(function()
                         page.ScrollBarImageColor3 = C.accent
                         if ActiveTab == tab then
-                                Tween(textLbl, T20, { TextColor3 = C.accentHi })
+                                Tween(btn, T20, { BackgroundColor3 = C.accent })
+                                Tween(chipStroke, T20, { Color = C.accentHi, Transparency = 0.15 })
+                                Tween(textLbl, T20, { TextColor3 = C.white })
                         else
                                 Tween(btn, T20, { BackgroundColor3 = C.tabChip })
-                                Tween(chipStroke, T20, { Color = C.borderAcc })
+                                Tween(chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
                                 Tween(textLbl, T20, { TextColor3 = C.text })
                         end
                 end)
@@ -3074,16 +3090,60 @@ function Library:CreateWindow(cfg)
                 -- CreateSection / CreateDivider / CreateLabel / CreateParagraph
                 -- ========================================================
                 function tab:CreateSection(text)
+                        -- [v4.3.0] Section headers get a signature treatment:
+                        -- a small accent tick before the label and a gradient
+                        -- rule that fades out to the right — instant hierarchy.
+                        local holder = Instance.new("Frame")
+                        holder.Size = UDim2.new(1, 0, 0, 18)
+                        holder.BackgroundTransparency = 1
+                        holder.Parent = page
+
+                        local tick = Instance.new("Frame")
+                        tick.Name = "SectionTick"
+                        tick.AnchorPoint = Vector2.new(0, 0.5)
+                        tick.Position = UDim2.new(0, 2, 0.5, -5)
+                        tick.Size = UDim2.fromOffset(3, 10)
+                        tick.BackgroundColor3 = C.accent
+                        tick.BorderSizePixel = 0
+                        tick.ZIndex = 2
+                        tick.Parent = holder
+                        corner(tick, UDim.new(1, 0))
+
                         local l = Instance.new("TextLabel")
-                        l.Size = UDim2.new(1, 0, 0, 18)
+                        l.Size = UDim2.new(1, -22, 1, 0)
+                        l.Position = UDim2.new(0, 12, 0, 0)
                         l.BackgroundTransparency = 1
                         l.Font = Enum.Font.GothamBold
                         l.TextSize = 10
                         l.TextColor3 = C.accent
                         l.TextXAlignment = Enum.TextXAlignment.Left
                         l.Text = string.upper(tostring(text or ""))
-                        l.Parent = page
-                        onTheme(function() Tween(l, T20, { TextColor3 = C.accent }) end)
+                        l.ZIndex = 2
+                        l.Parent = holder
+
+                        local rule = Instance.new("Frame")
+                        rule.Name = "SectionRule"
+                        rule.AnchorPoint = Vector2.new(1, 0.5)
+                        rule.Position = UDim2.new(1, -2, 0.5, 0)
+                        rule.Size = UDim2.new(0.45, 0, 0, 1)
+                        rule.BackgroundColor3 = C.accent
+                        rule.BackgroundTransparency = 0.45
+                        rule.BorderSizePixel = 0
+                        rule.ZIndex = 2
+                        rule.Parent = holder
+                        local ruleGrad = Instance.new("UIGradient")
+                        ruleGrad.Rotation = 0
+                        ruleGrad.Transparency = NumberSequence.new({
+                                NumberSequenceKeypoint.new(0.0, 0.15),
+                                NumberSequenceKeypoint.new(1.0, 1.0),
+                        })
+                        ruleGrad.Parent = rule
+
+                        onTheme(function()
+                                tick.BackgroundColor3 = C.accent
+                                Tween(l, T20, { TextColor3 = C.accent })
+                                rule.BackgroundColor3 = C.accent
+                        end)
                         local obj = {}
                         function obj:Set(newText) l.Text = string.upper(tostring(newText or "")) end
                         return obj
@@ -3271,10 +3331,35 @@ function Library:CreateWindow(cfg)
                                         ColorSequenceKeypoint.new(1.0, C.accentDark),
                                 }, 100)
                         end
+                        -- (Secondary buttons stay SOLID panel: the accent spine,
+                        -- hover raise, and arrow slide carry the flavor — and a
+                        -- solid fill renders exactly as themed, no gradient
+                        -- multiplication surprises.)
+
+                        -- [v4.3.0] SIGNATURE SPINE: a 3px accent bar hugs the left
+                        -- edge of every button — the library's visual signature.
+                        -- It brightens and stretches slightly on hover.
+                        local spine = Instance.new("Frame")
+                        spine.Name = "AccentSpine"
+                        spine.AnchorPoint = Vector2.new(0, 0.5)
+                        spine.Position = UDim2.new(0, 5, 0.5, -10)
+                        spine.Size = UDim2.fromOffset(3, 20)
+                        spine.BackgroundColor3 = primary and C.accentHi or C.accentDim
+                        spine.BorderSizePixel = 0
+                        spine.ZIndex = 3
+                        spine.Parent = b
+                        corner(spine, UDim.new(1, 0))
+
+                        -- [v4.1.0/v4.3.0] Press + hover scale: declared before the
+                        -- hover handlers because they share it for the hover raise.
+                        local btnPressScale = Instance.new("UIScale")
+                        btnPressScale.Name = "_PressScale"
+                        btnPressScale.Scale = 1
+                        btnPressScale.Parent = b
 
                         local lbl = Instance.new("TextLabel")
-                        lbl.Size = UDim2.new(1, -32, 1, 0)
-                        lbl.Position = UDim2.new(0, 14, 0, 0)
+                        lbl.Size = UDim2.new(1, -36, 1, 0)
+                        lbl.Position = UDim2.new(0, 18, 0, 0)
                         lbl.BackgroundTransparency = 1
                         lbl.Font = Enum.Font.GothamMedium
                         lbl.TextSize = 13
@@ -3287,10 +3372,10 @@ function Library:CreateWindow(cfg)
 
                         local arr = Instance.new("TextLabel")
                         arr.Size = UDim2.new(0, 18, 1, 0)
-                        arr.Position = UDim2.new(1, -22, 0, 0)
+                        arr.Position = UDim2.new(1, -24, 0, 0)
                         arr.BackgroundTransparency = 1
                         arr.Font = Enum.Font.GothamBold
-                        arr.TextSize = 14
+                        arr.TextSize = 15
                         arr.TextColor3 = primary and C.accentHi or C.muted
                         arr.Text = "›"
                         arr.Parent = b
@@ -3298,17 +3383,34 @@ function Library:CreateWindow(cfg)
                         b.MouseEnter:Connect(function()
                                 Tween(b, T20, { BackgroundColor3 = primary and C.accentDim or C.panelHov })
                                 Tween(strk, T20, { Color = primary and C.accentHi or C.accentDim })
-                                Tween(arr, T20, { TextColor3 = primary and C.white or C.accent, Position = UDim2.new(1, -18, 0, 0) })
+                                Tween(arr, T20, { TextColor3 = primary and C.white or C.accent, Position = UDim2.new(1, -16, 0, 0) })
+                                -- [v4.3.0] Spine lights up + grows on hover.
+                                Tween(spine, T20, {
+                                        BackgroundColor3 = C.accent,
+                                        Size = UDim2.fromOffset(3, 28),
+                                        Position = UDim2.new(0, 5, 0.5, -14),
+                                })
+                                -- [v4.3.0] Hover raise: 1.5% scale-up (layout stays owned
+                                -- by UIListLayout — UIScale only).
+                                if not reducedMotion then
+                                        Tween(btnPressScale, TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                                { Scale = 1.015 })
+                                end
                         end)
                         b.MouseLeave:Connect(function()
                                 Tween(b, T20, { BackgroundColor3 = primary and C.accentDark or C.panel })
                                 Tween(strk, T20, { Color = primary and C.accentDim or C.border })
-                                Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted, Position = UDim2.new(1, -22, 0, 0) })
+                                Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted, Position = UDim2.new(1, -24, 0, 0) })
+                                Tween(spine, T20, {
+                                        BackgroundColor3 = primary and C.accentHi or C.accentDim,
+                                        Size = UDim2.fromOffset(3, 20),
+                                        Position = UDim2.new(0, 5, 0.5, -10),
+                                })
+                                if not reducedMotion then
+                                        Tween(btnPressScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                                { Scale = 1 })
+                                end
                         end)
-                        local btnPressScale = Instance.new("UIScale")
-                        btnPressScale.Name = "_PressScale"
-                        btnPressScale.Scale = 1
-                        btnPressScale.Parent = b
                         -- [v4.1.0] Micro press-feedback: a 3% dip on press with a
                         -- quick Quint return gives buttons a physical, snappy feel
                         -- without any layout shift (UIScale only).
@@ -3355,6 +3457,11 @@ function Library:CreateWindow(cfg)
                                 Tween(strk, T20, { Color = primary and C.accentDim or C.border })
                                 Tween(lbl, T20, { TextColor3 = primary and C.accentHi or C.text })
                                 Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted })
+                                Tween(spine, T20, {
+                                        BackgroundColor3 = primary and C.accentHi or C.accentDim,
+                                        Size = UDim2.fromOffset(3, 20),
+                                        Position = UDim2.new(0, 5, 0.5, -10),
+                                })
                                 if buttonGradient then
                                         buttonGradient.Color = ColorSequence.new{
                                                 ColorSequenceKeypoint.new(0.0, C.accentDim),

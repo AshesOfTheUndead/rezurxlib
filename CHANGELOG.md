@@ -1,5 +1,48 @@
 # Changelog
 
+## v4.3.0 — Spice
+
+Feedback: "these buttons look boring as hell… nothing special, no spice, no
+flavour." A design audit of the live screenshot confirmed it — flat cookie-
+cutter cards, zero depth on buttons, and an active tab distinguishable only
+by transparency. Fixed on all three fronts.
+
+### Active tab = accent highlight (as requested)
+- Clicking a tab now fills it with the theme's accent color: a solid accent
+  chip, white **GothamBold** text, and a bright accentHi stroke. Inactive
+  tabs remain quiet dark chips (medium weight). The selected tab is
+  unmistakable at a glance.
+- Renders exactly the theme accent: the chip's gradient is a white identity
+  (UIGradient multiplies with BackgroundColor3, so the fill color is carried
+  by the background, never double-darkened by a tint).
+
+### Buttons — redesigned with a signature
+- **Accent spine**: a 3px rounded accent bar hugs the left edge of every
+  button. On hover it lights up and grows (20→28px). This is the library's
+  visual signature — no more anonymous gray slabs.
+- **Hover raise**: buttons scale to 101.5% on hover and settle back — a
+  physical "pick me up" cue (UIScale only, layout untouched).
+- **Arrow slide**: the "›" chevron is bigger (15px), slides further on
+  hover, and turns accent.
+- Label inset widened to clear the spine.
+
+### Section headers — typographic hierarchy
+- Each section now leads with a small accent tick, and a gradient rule
+  (accent → transparent) sweeps right from the title. Headers read as
+  structure, not floating uppercase text.
+
+### Rendering-safety note
+- Secondary buttons intentionally stay solid-filled: the spine, raise, and
+  chevron carry the flavor without risking gradient×background
+  multiplication artifacts.
+
+### Verified
+- New tests: active-tab accent fill + white bold text + font-weight
+  transitions on switch, accent spine / section rule / section tick
+  presence, hover raise (1.015) and settle. **120/120 passing.**
+
+---
+
 ## v4.2.0 — True Curves & the Jackpot Entrance
 
 Two directives from the field: the curves were wrong, and opening the menu

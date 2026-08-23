@@ -1,4 +1,4 @@
-# 👑 RezurXLib v4.3.0 "Aurora"
+# 👑 RezurXLib v4.4.0 "Aurora"
 
 **A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
@@ -13,6 +13,17 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 ---
 
 ## ✨ What's New in v4.0 "Aurora"
+
+### 🔮 Prism (v4.4.0)
+- **Pixel-perfect fixes** — status bar breathing room, clean minimize (no orange stripe), centered FPS divider, uniform section rules
+- **Sliding underline tab indicator** — a 3px accent bar that glides beneath the active tab
+- **Button glow halos** — soft accent halos that fade in on hover; primary buttons glow at rest
+- **Glassmorphism** — opt-in `BackdropBlur = true` frosts the world behind the window
+- **Animated light strips** — pulsing section ticks, sweeping button spines (UIGradient.Offset)
+- **Squishy toggle physics** — the thumb stretches as it travels and springs back
+- **CreateGraph** — live sparkline: `:Push(value)` or auto-`Sample`, scrolling window, auto-scale
+- **UI sound design** — opt-in `Sounds = true`, pitched per action, engine-local assets
+- **Keybind badge** — the footer shows a live `[K] HIDE` shortcut pill
 
 ### 🌶️ Spice (v4.3.0)
 - **Active tab = accent fill** — the selected tab is a solid accent chip with white bold text, exactly as requested
@@ -112,6 +123,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 | **Spinners** | Loop animations, no heartbeat required |
 | **Accordions** | Collapsible content sections |
 | **Bindable Controls** | Toggle + keybind combined |
+| **Graphs** | Live sparklines with auto-sampling |
 | **Carousels** | Content sliders with arrows |
 | **Search & Command Palette** | Live filtering, Ctrl+K palette |
 | **Modals** | Confirmation dialogs |
@@ -128,7 +140,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 - **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
 - **Error-handled** — every callback wrapped in `pcall`
 - **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 120 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
+- **Headless-tested** — 142 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
 - **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
 - **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
 
@@ -186,6 +198,8 @@ _G.RezurXLib:CreateWindow({ Name = "Admin Panel" })
 | `ReducedMotion` | `boolean` | Disable all animation |
 | `KeySystem` / `KeySettings` | — | See above |
 | `ConfigurationSaving` | `table` | See above |
+| `Sounds` | `bool/table` | UI click sounds (v4.4) |
+| `BackdropBlur` | `boolean` | Frosted backdrop (v4.4) |
 
 **Returns:** `Window` object
 

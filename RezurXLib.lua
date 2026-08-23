@@ -41,6 +41,8 @@ local CoreGui          = game:GetService("CoreGui")
 local GuiService       = game:GetService("GuiService")
 local TextService      = game:GetService("TextService")
 local HttpService      = game:GetService("HttpService")
+local SoundService     = game:GetService("SoundService")
+local Lighting         = game:GetService("Lighting")
 
 local player    = Players.LocalPlayer
 local playerGui = player and player:WaitForChild("PlayerGui")
@@ -351,7 +353,7 @@ local _tweens = setmetatable({}, { __mode = "k" })
 -- keeps separate RezurX windows independent when one needs reduced motion.
 local function motionScaleFor(inst)
         local cursor = inst
-        while cursor do
+        while cursor and typeof(cursor) == "Instance" do
                 if cursor:IsA("ScreenGui") then
                         if cursor:GetAttribute("RezurXReducedMotion") then return 0 end
                         local scale = cursor:GetAttribute("RezurXMotionScale")
@@ -672,7 +674,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "4.3.0"
+Library.Version = "4.4.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -1084,7 +1086,11 @@ function Library:CreateWindow(cfg)
         -- some clients even though the ordering fix above covers the common case.
         task.delay(0.3, updateScale)
 
-        local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 24
+        -- [v4.4.0 FIX] STATUSBAR_H 24 → 30: the old 24px bar left the READY dot
+        -- and version text squeezed against the frame's bottom border (the
+        -- R.outer=20 corner curve eats into the bar's vertical space). 30px
+        -- gives the 14px text real breathing room.
+        local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 30
 
         -- ------------------------------------------------------------
         -- LAYERED DEPTH SHADOW (v4.0)
@@ -1526,13 +1532,17 @@ function Library:CreateWindow(cfg)
         local statStroke = stroke(statFrame, C.border, 1)
 
         local fpsLabel = Instance.new("TextLabel")
-        fpsLabel.Size = UDim2.new(0.5, 0, 1, 0)
+        -- [v4.4.0 FIX] Both labels now HUG the divider (FPS right-aligned with
+        -- an 7px inset, ms left-aligned with a 7px inset) so the divider reads
+        -- perfectly centered between the two values regardless of text width.
+        fpsLabel.Size = UDim2.new(0.5, -7, 1, 0)
         fpsLabel.BackgroundTransparency = 1
         fpsLabel.Font = Enum.Font.Code
         fpsLabel.TextStrokeTransparency = 0.5
         fpsLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
         fpsLabel.TextSize = 12
         fpsLabel.TextColor3 = C.green
+        fpsLabel.TextXAlignment = Enum.TextXAlignment.Right
         fpsLabel.Text = "60 FPS"
         fpsLabel.ZIndex = 5
         fpsLabel.Parent = statFrame
@@ -1546,14 +1556,15 @@ function Library:CreateWindow(cfg)
         statDivider.Parent = statFrame
 
         local pingLabel = Instance.new("TextLabel")
-        pingLabel.Size = UDim2.new(0.5, 0, 1, 0)
-        pingLabel.Position = UDim2.new(0.5, 0, 0, 0)
+        pingLabel.Size = UDim2.new(0.5, -7, 1, 0)
+        pingLabel.Position = UDim2.new(0.5, 7, 0, 0)
         pingLabel.BackgroundTransparency = 1
         pingLabel.Font = Enum.Font.Code
         pingLabel.TextStrokeTransparency = 0.5
         pingLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
         pingLabel.TextSize = 12
         pingLabel.TextColor3 = C.green
+        pingLabel.TextXAlignment = Enum.TextXAlignment.Left
         pingLabel.Text = "— ms"
         pingLabel.ZIndex = 5
         pingLabel.Parent = statFrame
@@ -1625,13 +1636,35 @@ function Library:CreateWindow(cfg)
         minGlyph.Parent = minBtn
         corner(minGlyph, UDim.new(1, 0))
 
+        -- [v4.4.0] Min/close hover: 1.08x scale + soft glow ring — the window
+        -- controls now feel as polished as the content (as requested).
+        local minScale = Instance.new("UIScale")
+        minScale.Name = "_HoverScale"
+        minScale.Scale = 1
+        minScale.Parent = minBtn
+        local minRing = Instance.new("Frame")
+        minRing.Name = "HoverGlow"
+        minRing.Size = UDim2.new(1, 8, 1, 8)
+        minRing.Position = UDim2.new(0, -4, 0, -4)
+        minRing.BackgroundColor3 = C.accent
+        minRing.BackgroundTransparency = 1
+        minRing.BorderSizePixel = 0
+        minRing.ZIndex = 4
+        minRing.Parent = minBtn
+        corner(minRing, concentric(R.small, 4))
         minBtn.MouseEnter:Connect(function()
                 Tween(minBtn, T10, { BackgroundColor3 = C.panelHov })
                 Tween(minGlyph, T10, { BackgroundColor3 = C.text })
+                Tween(minStroke, T10, { Color = C.accentDim })
+                Tween(minScale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.08 })
+                Tween(minRing, T15, { BackgroundTransparency = 0.88 })
         end)
         minBtn.MouseLeave:Connect(function()
                 Tween(minBtn, T10, { BackgroundColor3 = C.panelAlt })
                 Tween(minGlyph, T10, { BackgroundColor3 = C.muted })
+                Tween(minStroke, T10, { Color = C.border })
+                Tween(minScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 })
+                Tween(minRing, T15, { BackgroundTransparency = 1 })
         end)
         onTheme(function()
                 Tween(minBtn, T20, { BackgroundColor3 = C.panelAlt })
@@ -1690,15 +1723,21 @@ function Library:CreateWindow(cfg)
         xBar2.Rotation = -45
         xBar2.Parent = closeBtn
 
+        local closeScale = Instance.new("UIScale")
+        closeScale.Name = "_HoverScale"
+        closeScale.Scale = 1
+        closeScale.Parent = closeBtn
         closeBtn.MouseEnter:Connect(function()
                 Tween(closeBtn, T10, { BackgroundColor3 = Color3.fromRGB(210, 55, 55) })
                 Tween(closeStroke, T10, { Color = Color3.fromRGB(255, 120, 120) })
                 Tween(closeGlow, T15, { BackgroundTransparency = 0.75 })
+                Tween(closeScale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.08 })
         end)
         closeBtn.MouseLeave:Connect(function()
                 Tween(closeBtn, T10, { BackgroundColor3 = Color3.fromRGB(120, 30, 30) })
                 Tween(closeStroke, T10, { Color = Color3.fromRGB(160, 50, 50) })
                 Tween(closeGlow, T15, { BackgroundTransparency = 1 })
+                Tween(closeScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 })
         end)
         closeBtn.MouseButton1Down:Connect(function()
                 Tween(closeBtn, TPRESS, { Size = UDim2.new(0, 34, 0, 29) })
@@ -1911,29 +1950,34 @@ function Library:CreateWindow(cfg)
         tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
         tabLayout.Parent = tabRail
 
+        -- [v4.4.0 REDESIGN] The indicator is now a 3px SLIDING UNDERLINE that
+        -- rides beneath the active tab chip (as requested) instead of a
+        -- full-size dark pill that sat misaligned and rendered as a stray
+        -- "black chip" at the rail's left edge. Chips sit at y=0..30 in the
+        -- 40px bar; the underline lives in the 6px strip below them.
         local tabIndicator = Instance.new("Frame")
         tabIndicator.Name = "ActiveIndicator"
-        tabIndicator.Size = UDim2.new(0, 70, 0, TABBAR_H - 10)
-        tabIndicator.Position = UDim2.new(0, 4, 0, 5)
-        tabIndicator.BackgroundColor3 = C.accentDark
+        tabIndicator.Size = UDim2.new(0, 70, 0, 3)
+        tabIndicator.Position = UDim2.new(0, 4, 0, TABBAR_H - 5)
+        tabIndicator.BackgroundColor3 = C.accent
         tabIndicator.BorderSizePixel = 0
-        tabIndicator.ZIndex = 3
+        tabIndicator.ZIndex = 6
         tabIndicator.Parent = tabBar
-        corner(tabIndicator, R.tab)
-        local tabIndicatorStroke = stroke(tabIndicator, C.accentDim, 1.25)
+        corner(tabIndicator, UDim.new(1, 0))
         local tabIndGrad = gradient(tabIndicator, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.indGradA),
-                ColorSequenceKeypoint.new(1.0, C.indGradB),
-        }, 90)
+                ColorSequenceKeypoint.new(0.0, C.accentDim),
+                ColorSequenceKeypoint.new(0.5, C.accentHi),
+                ColorSequenceKeypoint.new(1.0, C.accentDim),
+        }, 0)
         onTheme(function()
                 Tween(tabBar, T20, { BackgroundColor3 = C.tabBarBg })
                 tabBar.ScrollBarImageColor3 = C.accent
                 Tween(tabBarStroke, T20, { Color = C.border })
-                tabIndicator.BackgroundColor3 = C.accentDark
-                Tween(tabIndicatorStroke, T20, { Color = C.accentDim })
+                Tween(tabIndicator, T20, { BackgroundColor3 = C.accent })
                 tabIndGrad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.indGradA),
-                        ColorSequenceKeypoint.new(1.0, C.indGradB),
+                        ColorSequenceKeypoint.new(0.0, C.accentDim),
+                        ColorSequenceKeypoint.new(0.5, C.accentHi),
+                        ColorSequenceKeypoint.new(1.0, C.accentDim),
                 }
         end)
 
@@ -2075,7 +2119,8 @@ function Library:CreateWindow(cfg)
         sVer.AutomaticSize = Enum.AutomaticSize.X
         sVer.Size = UDim2.new(0, 0, 0, 14)
         sVer.AnchorPoint = Vector2.new(1, 0.5)
-        sVer.Position = UDim2.new(1, -56, 0.5, -7)
+        -- [v4.4.0] Shifted left to make room for the new keybind badge chip.
+        sVer.Position = UDim2.new(1, -84, 0.5, -7)
         sVer.BackgroundTransparency = 1
         sVer.Font = Enum.Font.Code
         sVer.TextSize = 10
@@ -2085,6 +2130,42 @@ function Library:CreateWindow(cfg)
         sVer.ZIndex = 6
         sVer.Text = windowName .. " · RezurXLib v" .. Library.Version
         sVer.Parent = statusBar
+
+        -- [v4.4.0] QUICK-ACCESS KEYBIND BADGE: a chip in the footer showing the
+        -- live toggle shortcut (e.g. "[K] HIDE") — discoverable accessibility
+        -- without reading docs. Updates when SetToggleKeybind changes.
+        local keyBadge = Instance.new("Frame")
+        keyBadge.Name = "KeybindBadge"
+        keyBadge.AutomaticSize = Enum.AutomaticSize.X
+        keyBadge.Size = UDim2.new(0, 0, 0, 18)
+        keyBadge.AnchorPoint = Vector2.new(1, 0.5)
+        keyBadge.Position = UDim2.new(1, -14, 0.5, -9)
+        keyBadge.BackgroundColor3 = C.panelAlt
+        keyBadge.BorderSizePixel = 0
+        keyBadge.ZIndex = 6
+        keyBadge.Parent = statusBar
+        corner(keyBadge, R.pill)
+        local keyBadgeStroke = stroke(keyBadge, C.border, 1)
+        pad(keyBadge, 2, 2, 8, 8)
+        local keyBadgeLbl = Instance.new("TextLabel")
+        keyBadgeLbl.Size = UDim2.new(0, 0, 1, 0)
+        keyBadgeLbl.AutomaticSize = Enum.AutomaticSize.X
+        keyBadgeLbl.BackgroundTransparency = 1
+        keyBadgeLbl.Font = Enum.Font.Code
+        keyBadgeLbl.TextSize = 9
+        keyBadgeLbl.TextColor3 = C.textDim
+        keyBadgeLbl.TextXAlignment = Enum.TextXAlignment.Left
+        keyBadgeLbl.Text = "[" .. string.upper(keyName(toggleKey)) .. "] HIDE"
+        keyBadgeLbl.ZIndex = 7
+        keyBadgeLbl.Parent = keyBadge
+        local function refreshKeyBadge()
+                keyBadgeLbl.Text = "[" .. string.upper(keyName(toggleKey)) .. "] HIDE"
+        end
+        onTheme(function()
+                Tween(keyBadge, T20, { BackgroundColor3 = C.panelAlt })
+                Tween(keyBadgeStroke, T20, { Color = C.border })
+                Tween(keyBadgeLbl, T20, { TextColor3 = C.textDim })
+        end)
         onTheme(function()
                 Tween(sTxt, T20, { TextColor3 = C.muted })
                 Tween(sVer, T20, { TextColor3 = C.muted })
@@ -2197,6 +2278,69 @@ function Library:CreateWindow(cfg)
                 end
         end
         WindowJanitor:Add(closeCurrentPopup)
+
+        -- ------------------------------------------------------------
+        -- [v4.4.0] UI SOUND DESIGN — crisp, subtle futuristic feedback.
+        -- Opt-in: cfg.Sounds = true (or a table with per-action overrides:
+        -- { Volume = 0.4, Click = "rbxassetid://…", Tab = …, Toggle = … }).
+        -- Defaults use rbxasset:// local assets — they ship with the engine,
+        -- so nothing depends on marketplace IDs loading. One base ping,
+        -- pitched per action, reads as a coherent sound language.
+        -- ------------------------------------------------------------
+        local playSfx = function() end
+        do
+                local scfg = cfg.Sounds == true and {} or cfg.Sounds
+                if type(scfg) == "table" then
+                        local volume = math.clamp(tonumber(scfg.Volume) or 0.35, 0, 1)
+                        local baseId = tostring(scfg.Click or "rbxasset://sounds/electronicpingshort.wav")
+                        local ids = {
+                                Click  = tostring(scfg.Click or baseId),
+                                Tab    = tostring(scfg.Tab or scfg.Click or baseId),
+                                Toggle = tostring(scfg.Toggle or scfg.Click or baseId),
+                                Notify = tostring(scfg.Notify or scfg.Click or baseId),
+                        }
+                        playSfx = function(kind, speed)
+                                pcall(function()
+                                        local s = Instance.new("Sound")
+                                        s.SoundId = ids[kind] or ids.Click
+                                        s.Volume = volume
+                                        s.PlaybackSpeed = speed or 1
+                                        s.Parent = SoundService
+                                        SoundService:PlayLocalSound(s)
+                                        task.delay(1.5, function()
+                                                if s.Parent then s:Destroy() end
+                                        end)
+                                end)
+                        end
+                end
+        end
+
+        -- ------------------------------------------------------------
+        -- [v4.4.0] BACKDROP BLUR (glassmorphism) — opt-in via
+        -- cfg.BackdropBlur = true: a BlurEffect in Lighting frosts the world
+        -- behind the window while it is open (UI itself renders above
+        -- post-processing, so only the game view blurs). Janitor-cleaned.
+        -- ------------------------------------------------------------
+        local backdropBlur = nil
+        if cfg.BackdropBlur == true then
+                backdropBlur = Instance.new("BlurEffect")
+                backdropBlur.Name = "RezurXBackdropBlur"
+                backdropBlur.Size = 0
+                backdropBlur.Parent = Lighting
+                WindowJanitor:Add(function()
+                        if backdropBlur and backdropBlur.Parent then backdropBlur:Destroy() end
+                end)
+                task.delay(0.05, function()
+                        if backdropBlur and backdropBlur.Parent and frame.Visible then
+                                if reducedMotion then
+                                        backdropBlur.Size = 14
+                                else
+                                        Tween(backdropBlur, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                                { Size = 14 })
+                                end
+                        end
+                end)
+        end
 
         -- ------------------------------------------------------------
         -- NOTIFICATIONS
@@ -2372,6 +2516,7 @@ function Library:CreateWindow(cfg)
                 prog.Parent = n
 
                 Tween(n, T20, { BackgroundTransparency = 0.05 })
+                playSfx("Notify", 1.2)
                 -- [v4.1.0] Entrance: slide in from the right edge with a soft
                 -- overshoot settle — reads as "arriving" rather than growing.
                 Tween(n, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
@@ -2407,6 +2552,15 @@ function Library:CreateWindow(cfg)
                         content.Visible = false
                         statusBar.Visible = false
                         resizeHandle.Visible = false
+                        -- [v4.4.0 FIX] The minimized window kept the glow strip,
+                        -- header accent line, and footer mask visible — producing
+                        -- a floating orange stripe and a panel-colored band
+                        -- beneath the header instead of clean rounded corners.
+                        -- (ClipsDescendants clips to the RECT, not the UICorner,
+                        -- so full-width edge lines poke past the curve.)
+                        glowStrip.Visible = false
+                        footerMask.Visible = false
+                        accentLine.Visible = false
                         Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, HEADER_H) })
                         Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, 0) })
                         for i = 1, #shadowLayers do
@@ -2419,6 +2573,9 @@ function Library:CreateWindow(cfg)
                         content.Visible = true
                         statusBar.Visible = true
                         resizeHandle.Visible = resizable
+                        glowStrip.Visible = true
+                        footerMask.Visible = true
+                        accentLine.Visible = true
                         -- recompute body height from current WIN_H (supports resize)
                         Tween(frame, TMIN, { Size = UDim2.new(0, WIN_W, 0, WIN_H) })
                         Tween(body, TMIN, { Size = UDim2.new(1, 0, 0, WIN_H - HEADER_H) })
@@ -2465,6 +2622,10 @@ function Library:CreateWindow(cfg)
                         setShadowVisible(false)
                         ambientGlow.Visible = false
                         floatIcon.Visible = true
+                        if backdropBlur and backdropBlur.Parent then
+                                Tween(backdropBlur, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                        { Size = 0 })
+                        end
                 else
                         floatIcon.Visible = false
                         frame.Visible = true
@@ -2474,6 +2635,10 @@ function Library:CreateWindow(cfg)
                                 tabBar.Visible = true
                                 content.Visible = true
                                 statusBar.Visible = true
+                        end
+                        if backdropBlur and backdropBlur.Parent then
+                                Tween(backdropBlur, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                        { Size = 14 })
                         end
                         -- [v4.2.0] REVEAL POP: every re-show (toggle key, float
                         -- icon tap) lands with a spring and a fresh cascade —
@@ -2669,11 +2834,12 @@ function Library:CreateWindow(cfg)
                 local w = btn.AbsoluteSize.X / scale
                 -- Convert the visible coordinate back into the scrolling
                 -- canvas coordinate so the indicator stays under a tab even
-                -- after the horizontal rail has been scrolled.
+                -- after the horizontal rail has been scrolled. Y stays fixed:
+                -- the underline always rides the same strip beneath the chips.
                 local relX = (btn.AbsolutePosition.X - tabBar.AbsolutePosition.X) / scale
                         + tabBar.CanvasPosition.X
-                local goal = UDim2.new(0, relX, 0, tabIndicator.Position.Y.Offset)
-                local goalSize = UDim2.new(0, w, 0, tabIndicator.Size.Y.Offset)
+                local goal = UDim2.new(0, relX, 0, TABBAR_H - 5)
+                local goalSize = UDim2.new(0, w, 0, 3)
                 if animated then
                         Tween(tabIndicator, TTAB, { Position = goal, Size = goalSize })
                 else
@@ -2950,6 +3116,7 @@ function Library:CreateWindow(cfg)
                         end
                 end)
                 btn.Activated:Connect(function()
+                        playSfx("Tab", 1.25)
                         ripple(btn, btn.AbsoluteSize.X / 2, btn.AbsoluteSize.Y / 2, C.accent)
                         setActive(false)
                 end)
@@ -3090,16 +3257,27 @@ function Library:CreateWindow(cfg)
                 -- CreateSection / CreateDivider / CreateLabel / CreateParagraph
                 -- ========================================================
                 function tab:CreateSection(text)
-                        -- [v4.3.0] Section headers get a signature treatment:
-                        -- a small accent tick before the label and a gradient
-                        -- rule that fades out to the right — instant hierarchy.
+                        -- [v4.3.0/v4.4.0] Section headers: accent tick + title +
+                        -- gradient rule. Built with a horizontal UIListLayout so
+                        -- the gap between the text and the rule is IDENTICAL for
+                        -- every section regardless of title length (the old
+                        -- right-anchored rule started at varying distances —
+                        -- "ENGINE" hugged the text, "PROFILES" didn't).
                         local holder = Instance.new("Frame")
                         holder.Size = UDim2.new(1, 0, 0, 18)
                         holder.BackgroundTransparency = 1
                         holder.Parent = page
 
+                        local layout = Instance.new("UIListLayout")
+                        layout.FillDirection = Enum.FillDirection.Horizontal
+                        layout.SortOrder = Enum.SortOrder.LayoutOrder
+                        layout.Padding = UDim.new(0, 8)
+                        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+                        layout.Parent = holder
+
                         local tick = Instance.new("Frame")
                         tick.Name = "SectionTick"
+                        tick.LayoutOrder = 0
                         tick.AnchorPoint = Vector2.new(0, 0.5)
                         tick.Position = UDim2.new(0, 2, 0.5, -5)
                         tick.Size = UDim2.fromOffset(3, 10)
@@ -3108,10 +3286,36 @@ function Library:CreateWindow(cfg)
                         tick.ZIndex = 2
                         tick.Parent = holder
                         corner(tick, UDim.new(1, 0))
+                        -- [v4.4.0] Living tick: the gradient offset slides
+                        -- top-to-bottom in a slow loop when AnimatedAccents is on.
+                        local tickGrad = Instance.new("UIGradient")
+                        tickGrad.Rotation = 90
+                        tickGrad.Color = ColorSequence.new{
+                                ColorSequenceKeypoint.new(0.0, C.accentHi),
+                                ColorSequenceKeypoint.new(1.0, C.accentDim),
+                        }
+                        tickGrad.Parent = tick
+                        if animatedAccents and not reducedMotion then
+                                task.spawn(function()
+                                        while tick.Parent do
+                                                tickGrad.Offset = Vector2.new(0, -1)
+                                                Tween(tickGrad, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                        { Offset = Vector2.new(0, 1) })
+                                                task.wait(1.6)
+                                                if not tick.Parent then break end
+                                                tickGrad.Offset = Vector2.new(0, 1)
+                                                Tween(tickGrad, TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                        { Offset = Vector2.new(0, -1) })
+                                                task.wait(1.6)
+                                        end
+                                end)
+                        end
 
                         local l = Instance.new("TextLabel")
-                        l.Size = UDim2.new(1, -22, 1, 0)
-                        l.Position = UDim2.new(0, 12, 0, 0)
+                        l.Name = "SectionTitle"
+                        l.LayoutOrder = 1
+                        l.AutomaticSize = Enum.AutomaticSize.X
+                        l.Size = UDim2.new(0, 0, 1, 0)
                         l.BackgroundTransparency = 1
                         l.Font = Enum.Font.GothamBold
                         l.TextSize = 10
@@ -3123,9 +3327,8 @@ function Library:CreateWindow(cfg)
 
                         local rule = Instance.new("Frame")
                         rule.Name = "SectionRule"
-                        rule.AnchorPoint = Vector2.new(1, 0.5)
-                        rule.Position = UDim2.new(1, -2, 0.5, 0)
-                        rule.Size = UDim2.new(0.45, 0, 0, 1)
+                        rule.LayoutOrder = 2
+                        rule.Size = UDim2.new(1, 0, 0, 1)
                         rule.BackgroundColor3 = C.accent
                         rule.BackgroundTransparency = 0.45
                         rule.BorderSizePixel = 0
@@ -3141,6 +3344,10 @@ function Library:CreateWindow(cfg)
 
                         onTheme(function()
                                 tick.BackgroundColor3 = C.accent
+                                tickGrad.Color = ColorSequence.new{
+                                        ColorSequenceKeypoint.new(0.0, C.accentHi),
+                                        ColorSequenceKeypoint.new(1.0, C.accentDim),
+                                }
                                 Tween(l, T20, { TextColor3 = C.accent })
                                 rule.BackgroundColor3 = C.accent
                         end)
@@ -3319,7 +3526,10 @@ function Library:CreateWindow(cfg)
                         b.Text = ""
                         b.AutoButtonColor = false
                         b.BorderSizePixel = 0
-                        b.ClipsDescendants = true
+                        -- [v4.4.0] ClipsDescendants moved OFF the button and ONTO a
+                        -- dedicated ripple mask: the outer glow halo must be able
+                        -- to render beyond the button's rect (cards that pop off
+                        -- the background), while ripples still clip cleanly.
                         b.Selectable = true
                         b.Parent = page
                         corner(b, R.panel)
@@ -3336,9 +3546,40 @@ function Library:CreateWindow(cfg)
                         -- solid fill renders exactly as themed, no gradient
                         -- multiplication surprises.)
 
-                        -- [v4.3.0] SIGNATURE SPINE: a 3px accent bar hugs the left
-                        -- edge of every button — the library's visual signature.
-                        -- It brightens and stretches slightly on hover.
+                        -- [v4.4.0] OUTER GLOW HALO: an accent-tinted soft frame
+                        -- extending 7px past the button on every side — the card
+                        -- visually lifts off the dark background. Fades in on
+                        -- hover; primary buttons keep a faint resting glow.
+                        local glowHalo = Instance.new("Frame")
+                        glowHalo.Name = "GlowHalo"
+                        glowHalo.Size = UDim2.new(1, 14, 1, 14)
+                        glowHalo.Position = UDim2.new(0, -7, 0, -7)
+                        glowHalo.BackgroundColor3 = C.accent
+                        glowHalo.BackgroundTransparency = primary and 0.94 or 1
+                        glowHalo.BorderSizePixel = 0
+                        glowHalo.ZIndex = 1
+                        glowHalo.Parent = b
+                        corner(glowHalo, concentric(R.panel, 7))
+                        onTheme(function()
+                                glowHalo.BackgroundColor3 = C.accent
+                        end)
+
+                        -- [v4.4.0] Ripple mask: owns clipping so ripples respect
+                        -- the rounded rect while the halo escapes it.
+                        local rippleMask = Instance.new("Frame")
+                        rippleMask.Name = "RippleMask"
+                        rippleMask.Size = UDim2.new(1, 0, 1, 0)
+                        rippleMask.BackgroundTransparency = 1
+                        rippleMask.BorderSizePixel = 0
+                        rippleMask.ClipsDescendants = true
+                        rippleMask.ZIndex = 4
+                        rippleMask.Parent = b
+                        corner(rippleMask, R.panel)
+
+                        -- [v4.4.0] SIGNATURE SPINE with LIVING GRADIENT: the spine
+                        -- now carries a vertical accentHi→accentDim gradient; on
+                        -- hover a one-shot highlight sweeps top-to-bottom through
+                        -- it (UIGradient.Offset) — a glowing indicator, as asked.
                         local spine = Instance.new("Frame")
                         spine.Name = "AccentSpine"
                         spine.AnchorPoint = Vector2.new(0, 0.5)
@@ -3349,6 +3590,28 @@ function Library:CreateWindow(cfg)
                         spine.ZIndex = 3
                         spine.Parent = b
                         corner(spine, UDim.new(1, 0))
+                        local spineGrad = Instance.new("UIGradient")
+                        spineGrad.Rotation = 90
+                        spineGrad.Color = ColorSequence.new{
+                                ColorSequenceKeypoint.new(0.0, C.accentHi),
+                                ColorSequenceKeypoint.new(1.0, C.accentDim),
+                        }
+                        spineGrad.Parent = spine
+                        onTheme(function()
+                                spineGrad.Color = ColorSequence.new{
+                                        ColorSequenceKeypoint.new(0.0, C.accentHi),
+                                        ColorSequenceKeypoint.new(1.0, C.accentDim),
+                                }
+                        end)
+                        local spineSweeping = false
+                        local function sweepSpine()
+                                if spineSweeping or reducedMotion or not spine.Parent then return end
+                                spineSweeping = true
+                                spineGrad.Offset = Vector2.new(0, -1)
+                                Tween(spineGrad, TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                        { Offset = Vector2.new(0, 1) })
+                                task.delay(0.5, function() spineSweeping = false end)
+                        end
 
                         -- [v4.1.0/v4.3.0] Press + hover scale: declared before the
                         -- hover handlers because they share it for the hover raise.
@@ -3382,7 +3645,7 @@ function Library:CreateWindow(cfg)
 
                         b.MouseEnter:Connect(function()
                                 Tween(b, T20, { BackgroundColor3 = primary and C.accentDim or C.panelHov })
-                                Tween(strk, T20, { Color = primary and C.accentHi or C.accentDim })
+                                Tween(strk, T20, { Color = primary and C.accentHi or C.accentDim, Thickness = 1.5 })
                                 Tween(arr, T20, { TextColor3 = primary and C.white or C.accent, Position = UDim2.new(1, -16, 0, 0) })
                                 -- [v4.3.0] Spine lights up + grows on hover.
                                 Tween(spine, T20, {
@@ -3390,6 +3653,9 @@ function Library:CreateWindow(cfg)
                                         Size = UDim2.fromOffset(3, 28),
                                         Position = UDim2.new(0, 5, 0.5, -14),
                                 })
+                                -- [v4.4.0] Glow halo fades in; spine highlight sweeps.
+                                Tween(glowHalo, T20, { BackgroundTransparency = 0.9 })
+                                sweepSpine()
                                 -- [v4.3.0] Hover raise: 1.5% scale-up (layout stays owned
                                 -- by UIListLayout — UIScale only).
                                 if not reducedMotion then
@@ -3399,13 +3665,14 @@ function Library:CreateWindow(cfg)
                         end)
                         b.MouseLeave:Connect(function()
                                 Tween(b, T20, { BackgroundColor3 = primary and C.accentDark or C.panel })
-                                Tween(strk, T20, { Color = primary and C.accentDim or C.border })
+                                Tween(strk, T20, { Color = primary and C.accentDim or C.border, Thickness = 1 })
                                 Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted, Position = UDim2.new(1, -24, 0, 0) })
                                 Tween(spine, T20, {
                                         BackgroundColor3 = primary and C.accentHi or C.accentDim,
                                         Size = UDim2.fromOffset(3, 20),
                                         Position = UDim2.new(0, 5, 0.5, -10),
                                 })
+                                Tween(glowHalo, T20, { BackgroundTransparency = primary and 0.94 or 1 })
                                 if not reducedMotion then
                                         Tween(btnPressScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
                                                 { Scale = 1 })
@@ -3428,7 +3695,8 @@ function Library:CreateWindow(cfg)
                         end)
 
                         b.Activated:Connect(function()
-                                ripple(b, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
+                                playSfx("Click", 1.15)
+                                ripple(rippleMask, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
                                 Tween(b, T20, { BackgroundColor3 = C.accentDim })
                                 Tween(lbl, T20, { TextColor3 = C.white })
                                 task.delay(0.15, function()
@@ -3586,11 +3854,16 @@ function Library:CreateWindow(cfg)
                         local function apply(v, silent)
                                 state = v
                                 obj.CurrentValue = v
-                                -- The knob contracts briefly before settling into place.
-                                Tween(knob, TweenInfo.new(0.15, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
-                                        { Size = UDim2.new(0, 14, 0, 14) })
-                                task.delay(0.15, function()
-                                        Tween(knob, TTOGGLE, { Size = UDim2.new(0, 18, 0, 18) })
+                                -- [v4.4.0] SQUISHY SPRING PHYSICS: instead of a plain
+                                -- shrink-settle, the thumb STRETCHES along its travel
+                                -- (22x15 — pulled like taffy) and springs back to
+                                -- 18x18 with a Quart settle when it lands.
+                                Tween(knob, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                        { Size = UDim2.new(0, 22, 0, 15) })
+                                task.delay(0.16, function()
+                                        if not knob.Parent then return end
+                                        Tween(knob, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+                                                { Size = UDim2.new(0, 18, 0, 18) })
                                 end)
                                 -- Switch background fades smoothly
                                 Tween(sw, TTOGGLEBG, { BackgroundColor3 = state and C.accent or C.track })
@@ -3622,6 +3895,7 @@ function Library:CreateWindow(cfg)
                         function obj:Reset() apply(defaultState) end
 
                         hit.Activated:Connect(function()
+                                playSfx("Toggle", state and 1.0 or 1.4)
                                 apply(not state)
                         end)
                         onTheme(function()
@@ -5337,6 +5611,187 @@ function Library:CreateWindow(cfg)
                         return obj
                 end
 
+                -- ========================================================
+                -- [v4.4.0] CreateGraph({ Name, Max, Bars, Height, Suffix,
+                --                        Sample, RefreshRate, Flag })
+                -- A live sparkline: feed it values with :Push(v) (or provide
+                -- Sample = function() return n end for auto-polling) and it
+                -- plots a scrolling window of the last N samples. Perfect for
+                -- "$ Earned/min over time" style panels.
+                -- ========================================================
+                function tab:CreateGraph(gcfg)
+                        gcfg = gcfg or {}
+                        local nameText  = gcfg.Name or "Graph"
+                        local barCount  = math.clamp(math.floor(tonumber(gcfg.Bars) or 28), 8, 64)
+                        local fixedMax  = tonumber(gcfg.Max)
+                        local suffix    = gcfg.Suffix or ""
+                        local sampleFn  = type(gcfg.Sample) == "function" and gcfg.Sample or nil
+                        local refreshRate = math.clamp(tonumber(gcfg.RefreshRate) or 1, 0.1, 60)
+
+                        local holderHeight = math.clamp(math.floor(tonumber(gcfg.Height) or 86), 60, 200)
+                        local holder, hStroke = makeHolder(holderHeight)
+
+                        local lbl = Instance.new("TextLabel")
+                        lbl.Size = UDim2.new(1, -90, 0, 16)
+                        lbl.Position = UDim2.new(0, 14, 0, 6)
+                        lbl.BackgroundTransparency = 1
+                        lbl.Font = Enum.Font.GothamBold
+                        lbl.TextSize = 11
+                        lbl.TextColor3 = C.text
+                        lbl.TextXAlignment = Enum.TextXAlignment.Left
+                        lbl.TextTruncate = Enum.TextTruncate.AtEnd
+                        lbl.Text = string.upper(tostring(nameText))
+                        lbl.ZIndex = 2
+                        lbl.Parent = holder
+                        applyElementIcon(holder, gcfg.Icon, lbl)
+
+                        local valLbl = Instance.new("TextLabel")
+                        valLbl.Size = UDim2.new(0, 76, 0, 16)
+                        valLbl.Position = UDim2.new(1, -88, 0, 6)
+                        valLbl.BackgroundTransparency = 1
+                        valLbl.Font = Enum.Font.Code
+                        valLbl.TextSize = 11
+                        valLbl.TextColor3 = C.accent
+                        valLbl.TextXAlignment = Enum.TextXAlignment.Right
+                        valLbl.TextTruncate = Enum.TextTruncate.AtEnd
+                        valLbl.Text = "—" .. suffix
+                        valLbl.ZIndex = 2
+                        valLbl.Parent = holder
+
+                        -- Plot surface: bars grow from the bottom edge.
+                        local plot = Instance.new("Frame")
+                        plot.Name = "Plot"
+                        plot.Size = UDim2.new(1, -28, 1, -30)
+                        plot.Position = UDim2.new(0, 14, 0, 24)
+                        plot.BackgroundTransparency = 1
+                        plot.ClipsDescendants = true
+                        plot.ZIndex = 2
+                        plot.Parent = holder
+                        local plotLayout = Instance.new("UIListLayout")
+                        plotLayout.FillDirection = Enum.FillDirection.Horizontal
+                        plotLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                        plotLayout.Padding = UDim.new(0, 2)
+                        plotLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+                        plotLayout.Parent = plot
+
+                        local bars = {}
+                        for index = 1, barCount do
+                                local bar = Instance.new("Frame")
+                                bar.Name = "Bar" .. index
+                                bar.LayoutOrder = index
+                                bar.Size = UDim2.new(1 / barCount, -2, 0, 0)
+                                bar.AnchorPoint = Vector2.new(0, 1)
+                                bar.BackgroundColor3 = C.accentDim
+                                bar.BackgroundTransparency = 0.55
+                                bar.BorderSizePixel = 0
+                                bar.ZIndex = 2
+                                bar.Parent = plot
+                                corner(bar, UDim.new(1, 0))
+                                bars[index] = bar
+                        end
+
+                        local obj = { Values = {}, Latest = nil }
+                        local function render(animate)
+                                local count = #obj.Values
+                                local maxV = fixedMax
+                                if not maxV then
+                                        maxV = 0
+                                        for _, v in ipairs(obj.Values) do
+                                                if v > maxV then maxV = v end
+                                        end
+                                        if maxV <= 0 then maxV = 1 end
+                                end
+                                local plotH = plot.AbsoluteSize.Y
+                                if plotH <= 1 then plotH = holderHeight - 30 end
+                                for index = 1, barCount do
+                                        local bar = bars[index]
+                                        -- newest value maps to the LAST bar
+                                        local valueIndex = count - (barCount - index)
+                                        local v = valueIndex >= 1 and valueIndex <= count and obj.Values[valueIndex] or nil
+                                        local h = 0
+                                        if v then
+                                                h = math.clamp(v / maxV, 0.04, 1) * (plotH - 2)
+                                        end
+                                        local age = v and (barCount - index) or barCount
+                                        local isLatest = index == barCount and v ~= nil
+                                        if animate then
+                                                Tween(bar, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                                                        Size = UDim2.new(1 / barCount, -2, 0, math.floor(h + 0.5)),
+                                                        BackgroundTransparency = isLatest and 0 or math.min(0.35 + age / barCount * 0.45, 0.85),
+                                                        BackgroundColor3 = isLatest and C.accentHi or C.accentDim,
+                                                })
+                                        else
+                                                bar.Size = UDim2.new(1 / barCount, -2, 0, math.floor(h + 0.5))
+                                                bar.BackgroundTransparency = isLatest and 0 or math.min(0.35 + age / barCount * 0.45, 0.85)
+                                                bar.BackgroundColor3 = isLatest and C.accentHi or C.accentDim
+                                        end
+                                end
+                                if obj.Latest ~= nil then
+                                        valLbl.Text = tostring(obj.Latest) .. suffix
+                                end
+                        end
+
+                        --- Append a sample to the graph (scrolls the window).
+                        function obj:Push(value)
+                                value = tonumber(value)
+                                if value == nil then return obj.Latest end
+                                table.insert(obj.Values, value)
+                                while #obj.Values > barCount do
+                                        table.remove(obj.Values, 1)
+                                end
+                                obj.Latest = value
+                                render(true)
+                                return value
+                        end
+
+                        --- Clear all samples.
+                        function obj:Reset()
+                                obj.Values = {}
+                                obj.Latest = nil
+                                valLbl.Text = "—" .. suffix
+                                render(false)
+                        end
+
+                        --- Change the fixed scale (nil = auto-scale).
+                        function obj:SetMax(newMax)
+                                fixedMax = tonumber(newMax)
+                                render(true)
+                        end
+
+                        function obj:Get()
+                                return obj.Latest, obj.Values
+                        end
+
+                        function obj:Destroy()
+                                holder:Destroy()
+                        end
+
+                        onTheme(function()
+                                Tween(holder, T20, { BackgroundColor3 = C.panel })
+                                Tween(hStroke, T20, { Color = C.border })
+                                Tween(lbl, T20, { TextColor3 = C.text })
+                                Tween(valLbl, T20, { TextColor3 = C.accent })
+                                render(false)
+                        end)
+                        applyTooltip(holder, gcfg.Tooltip)
+                        registerFlag(gcfg.Flag, obj)
+                        render(false)
+
+                        -- Optional auto-sampling.
+                        if sampleFn then
+                                task.spawn(function()
+                                        while holder.Parent do
+                                                local ok, value = pcall(sampleFn)
+                                                if ok and tonumber(value) ~= nil then
+                                                        obj:Push(tonumber(value))
+                                                end
+                                                task.wait(refreshRate)
+                                        end
+                                end)
+                        end
+                        return obj
+                end
+
                 -- A compact status row works well in operational panels where
                 -- developers need a calm scan of services, systems, or checks.
                 function tab:CreateStatus(scfg)
@@ -6547,6 +7002,7 @@ function Library:CreateWindow(cfg)
                         return nil
                 end
                 toggleKey = nextKey
+                refreshKeyBadge()
                 return toggleKey
         end
 
@@ -7839,6 +8295,7 @@ function Library:GetDocs()
                         { Name = "CreateCarousel", Params = "Items, CurrentIndex, Callback, Tooltip, Flag", Returns = ":Next, :Previous, :SetItems, :Get", Description = "Compact rotating content." },
                         { Name = "CreateContextMenu", Params = "Name, ButtonText, Items, Tooltip, Flag", Returns = ":Open, :Close, :SetItems", Description = "On-demand action menu." },
                         { Name = "CreateStatus", Params = "Title, Text, State, Detail, Value, Flag", Returns = ":Set, :Get", Description = "Status indicator." },
+                        { Name = "CreateGraph", Params = "Name, Max, Bars, Height, Suffix, Sample, RefreshRate, Tooltip, Flag", Returns = ":Push, :Reset, :SetMax, :Get", Description = "[v4.4] Live sparkline graph: push values (or auto-sample) and watch the trend scroll." },
                         { Name = "CreateCodeBlock", Params = "Title, Content, CopyCallback, Height", Returns = ":Set, :Get", Description = "Monospace copyable content." },
                         { Name = "CreateTable", Params = "Title, Columns, Rows, OnRowActivated, Height", Returns = ":SetRows, :GetRows", Description = "Compact data grid." },
                         { Name = "CreateTextArea", Params = "Title, Text, Placeholder, Callback, Flag", Returns = ":Set, :Get, :Reset", Description = "Multi-line input." },

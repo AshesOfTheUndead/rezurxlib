@@ -1,5 +1,86 @@
 # Changelog
 
+## v4.4.0 — Prism: Pixel Fixes, Glow, Sound & Graphs
+
+A forensic design review of three live screenshots (vision-model audited)
+confirmed seven pixel-level flaws and unlocked a batch of high-tier
+features. Everything below is fixed, built, and verified — 142/142 tests.
+
+### Pixel-level fixes (from the screenshot audit)
+- **Status bar squeezed against the bottom border**: STATUSBAR_H 24 → 30.
+  The READY dot and version text now have real vertical breathing room
+  clear of the R.outer corner curve.
+- **Minimized-state orange stripe**: minimizing left the header glow strip,
+  accent line, and footer mask visible — a floating orange line and a
+  panel-colored band beneath the header instead of clean rounded corners
+  (ClipsDescendants clips to the RECT, not the UICorner, so full-width edge
+  lines poked past the curve). All three decorations now hide on minimize
+  and restore on expand.
+- **"Black empty chip" at the tab rail's left edge + vertical misalignment**:
+  the old full-size indicator pill was retired entirely. The active-tab
+  indicator is now a 3px accent-gradient UNDERLINE that slides beneath the
+  active chip on a fixed strip (y stays at 35 — never drifts). Exactly the
+  "sliding indicator bar beneath tabs" requested, with Back easing.
+- **FPS/Ping divider off-center**: FPS text is now right-aligned to hug the
+  divider and ms text left-aligned to hug it from the other side (7px insets
+  each) — the divider reads centered regardless of text width.
+- **Section rule gap inconsistency**: section headers rebuilt on a
+  horizontal UIListLayout — tick → title → rule with a fixed 8px gap. The
+  rule now starts at exactly the same distance from every title ("ENGINE"
+  and "PROFILES" match).
+
+### Dynamic visual depth & lighting (as requested)
+- **Button glow halos**: every button carries a soft accent halo extending
+  7px past its rect. It fades in on hover; primary buttons keep a faint
+  resting glow. Implemented via a dedicated ripple mask (clip moved off the
+  button itself) so halos escape the card while ripples still clip cleanly.
+- **Glassmorphism backdrop blur** (opt-in, `BackdropBlur = true`): a
+  BlurEffect in Lighting frosts the game world behind the window while it
+  is open; the UI renders above post-processing so only the backdrop
+  blurs. Tweens in/out with show/hide, Janitor-cleaned.
+- **Animated accent light strips**: section ticks now carry a vertical
+  accentHi→accentDim gradient with a slow top-to-bottom Offset pulse (when
+  AnimatedAccents is on), and button spines fire a one-shot gradient sweep
+  on hover — "glowing indicators," as requested.
+
+### High-end micro-interactions (as requested)
+- **Toggle squishy spring physics**: the thumb now STRETCHES to 22x15 while
+  it travels and springs back to 18x18 with a Quart settle — pulled-taffy
+  feel instead of a plain shrink.
+- **Min/close hover polish**: both window controls scale to 1.08x on hover;
+  the minimize button gains an accent glow ring, and its stroke lights up.
+- **Button hover**: stroke thickens to 1.5px in addition to the existing
+  raise, arrow slide, and spine grow.
+
+### Advanced features (as requested)
+- **CreateGraph** — a live sparkline element: `:Push(value)` appends samples
+  to a scrolling window (8–64 bars), or pass `Sample = function() … end`
+  with `RefreshRate` for auto-polling. Auto-scales or takes a fixed `Max`,
+  shows the latest value with an optional suffix, and color-fades older
+  bars. Perfect for "$ Earned/min over time".
+- **UI sound design** (opt-in, `Sounds = true` or a config table): crisp
+  pitched feedback for tabs, toggles, buttons, and notifications. Defaults
+  use engine-local `rbxasset://` assets — zero marketplace dependencies —
+  with full per-action override support.
+- **Quick-access keybind badge**: the footer now shows a live `[K] HIDE`
+  pill that updates when `SetToggleKeybind` changes — the toggle shortcut
+  is discoverable without reading any docs.
+
+### Robustness
+- `motionScaleFor` (the tween motion-preference walker) now guards against
+  non-Instance ancestors — tweening service-parented objects (e.g. the new
+  BlurEffect) no longer errors.
+
+### Verified
+- New tests: underline indicator geometry and strip-lock after switching,
+  minimize decoration hiding/restoring, sounds+blur window lifecycle,
+  graph push/cap/reset/geometry/bar heights, keybind badge default +
+  rebind update, glow halos on both button variants + hover fade in/out.
+  Mock harness extended (SoundService, Lighting, BlurEffect, Sound,
+  UIGradient.Offset, EnumItem.EnumType). **142/142 passing.**
+
+---
+
 ## v4.3.0 — Spice
 
 Feedback: "these buttons look boring as hell… nothing special, no spice, no

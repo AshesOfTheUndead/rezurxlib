@@ -23,8 +23,10 @@ local Window = Lib:CreateWindow({
         LoadingTitle    = "RezurX lab",
         LoadingEnabled  = true,
         Theme           = "Ember",            -- "Ember" | "Ocean" | "Crimson" | "Slate" | "Midnight" | ...
-        ToggleUIKeybind = Enum.KeyCode.K,     -- hide/show the whole UI
+        ToggleUIKeybind = Enum.KeyCode.K,     -- hide/show the whole UI (shown as [K] HIDE in the footer)
         Icon            = 4483362458,         -- [v4] asset id in the header badge (or "rbxassetid://…", or emoji text)
+        Sounds          = true,               -- [v4.4] crisp UI click sounds (or { Volume = 0.4, Click = "rbxassetid://…" })
+        BackdropBlur    = true,               -- [v4.4] frosted-glass blur of the world behind the window
 
         -- [v4] Auto-save flagged elements to the executor's filesystem.
         -- Values restore automatically on the next run. Safe no-op in Studio.
@@ -199,6 +201,19 @@ VisualsTab:CreateButton({
                         Window:Notify({ Title = "Upload", Content = "Complete.", Type = "success" })
                 end)
         end,
+})
+
+-- [v4.4] Live sparkline — plot any metric over time. Push values yourself,
+-- or let Sample auto-poll for you.
+local earnGraph = VisualsTab:CreateGraph({
+        Name = "EARN RATE",
+        Suffix = "/min",
+        Bars = 28,
+        Height = 90,
+        Sample = function()
+                return math.random(80, 240) -- replace with your live metric
+        end,
+        RefreshRate = 1,
 })
 VisualsTab:CreateCarousel({
         Items = {

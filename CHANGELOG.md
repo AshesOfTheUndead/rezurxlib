@@ -1,5 +1,114 @@
 # Changelog
 
+## v5.0.0 "Trace" — Geometry, One Motion, Subtraction
+
+This release stops adding effects and fixes the foundation. Answering the
+three open questions up front: **zero-asset is a hard rule for defaults**
+(`cfg.ShadowImage` is the opt-in escape hatch), **the competing effects are
+actually deleted** (not just disabled), and the phases shipped **together**
+as v5.0.0 because every change is internal or additive and the full suite
+runs green — 167/167.
+
+### Phase 1 — Geometry (the "looks bad" fixes)
+- **Concentric radius law, enforced in code.** `radiusFor(parent, inset)`
+  = parent − inset (clamped ≥ 0) for nested frames; `concentric(r, pad)` =
+  r + pad for outset layers. No hand-derived UICorner values anywhere — a
+  test now asserts every radius in the tree is a legal value.
+- **Stacked-frame shadows killed.** Three semi-transparent frames always
+  stair-step at the corners. Now ONE shadow instance: a concentric frame by
+  default (zero-asset, uniform falloff) or a 9-slice ImageLabel when the
+  developer passes their own `cfg.ShadowImage`. The accent ambient glow was
+  deleted outright — Trace is the accent presence now.
+- **Integer-snap everything.** Resting positions/sizes carrying a UICorner
+  are whole-pixel offsets (`snapPx`); springs snap on write. Fractional
+  offsets were the "not perfectly round at 2x zoom" artifact.
+- **True pills.** `UDim.new(0.5, 0)` everywhere (keybind pills, footer
+  badge) — height-relative, never a fixed offset fighting the height.
+- **UIScale entrances banned.** Scaling a rounded frame re-rasterizes its
+  corners every frame (visible crawl). The window now LANDS via Size
+  springs (position derives from size, corner geometry stays CONSTANT); the
+  card cascade is a page-rise + stroke flash with zero UIScale; every popup
+  (picker, menu, palette, modal, key gate) enters via position + opacity.
+  Press-dip and the toggle squish stay — they're feedback.
+- **Corner bleed + stroke audit.** Strokes stay ≤ 1.5px, Border mode; the
+  ripple mask owns clipping so nothing squares off a rounded parent.
+
+### Phase 2 — Motion engine
+- **Spring solver**: stiffness/damping integration on RunService delta
+  (never wall-clock — executor tick() can disagree with render time).
+  Interruptible and velocity-preserving by design: retargeting mid-flight
+  continues from current momentum. Springs never write to destroyed
+  instances (destroy-race guard, killed on window teardown).
+- **Four motion tokens** — `instant` / `snap` (0.12 Quad) / `settle`
+  (0.24 Quint) / `enter` (0.42 Back). Every legacy T-constant aliases a
+  token, so the entire library collapsed onto four curves with zero
+  call-site churn. No more ad-hoc Quart 0.26.
+- **Motion budget**: hard cap of 12 concurrent springs; overflow snaps to
+  the end state. An entrance cascade can never hitch a 30 FPS host.
+- **Frame-time guard**: a Heartbeat EMA degrades motion to 0.5x scale
+  silently when the host runs worse than ~30 FPS, and self-heals when
+  frames recover. No user config.
+
+### Phase 3 — Aurora Trace (the one signature)
+A single accent light travels the window perimeter: a narrow bright band
+in a UIGradient on the border stroke, driven by an interruptible spring on
+Rotation. One instance, one spring, near-zero cost. Reused everywhere:
+window entrance (full lap), tab switch (quarter lap toward travel),
+successful action (accent lap), error / wrong key (the same lap in red).
+**Deleted to make room**: the shockwave ring, button glow halos, spine
+sweeps, section tick pulses, and header shimmer. Six competitors out, one
+voice in. BackdropBlur is now documented honestly: it blurs the ENTIRE
+game world (a global Lighting side effect), stays off by default, and is
+reference-counted across windows so it's destroyed exactly when the last
+user goes away.
+
+### Phase 4 — Mobile as a first-class target
+- **Density modes** (Compact / Comfortable), auto-selected from viewport
+  and TouchEnabled; `cfg.Density` overrides. Row heights, paddings, and
+  list gaps all read from one token set.
+- **Sheet mode**: below ~500px viewport width the window becomes a
+  near-fullscreen pinned sheet (viewport−16 × viewport−110, scale 1) with
+  hysteresis at the boundary — no more shrunken desktop panel on phones.
+- **44px minimum touch targets** on every interactive row (buttons,
+  toggles, sliders, inputs, dropdowns, keybinds, context menus) and the
+  resize handle.
+- **ReducedMotion audit**: every Phase 2/3 animation gates on it — verified
+  by test (entrance snaps, zero springs, Trace no-ops). Roblox exposes no
+  platform reduced-motion setting to Luau; the manual default stands,
+  documented as such.
+- **DisplayOrder** exposed (`cfg.DisplayOrder`) — never silently maxed, so
+  competing GUIs can deliberately bury the window.
+- Viewport resizes mid-animation resolve geometry springs and re-clamp
+  instead of fighting them.
+
+### Phase 5 — Hygiene & maintainability
+- **`.env` removed from the repo** (it was public; `DATABASE_URL` must be
+  ROTATED — removal doesn't purge git history). Next.js scaffold,
+  lockfiles, skills/, upload/, download/, tool-results/ all removed; the
+  repo is the library and its docs.
+- **Module split**: `src/` (core / themes / motion / helpers / window /
+  api) + `scripts/build_bundle.py` emits the single-file bundle. The build
+  is verified byte-identical to the monolith. Consumers see no change;
+  editing stops being a monolith job.
+- **Extended headless suite** (167 checks, up from 142): radius-law
+  invariants across the whole tree, motion-budget cap, spring interruption
+  semantics, reduced-motion coverage, sheet-mode geometry, blur refcount
+  lifecycle, DisplayOrder passthrough, plus every prior regression
+  (including the ReplaceExisting ghost-window fix).
+
+### Migration notes (v4 → v5)
+- **No breaking API changes.** All v4 configs still work.
+- `AnimatedAccents` is a deprecated no-op (all ambient loops were removed).
+- `BackdropBlur` still works but is documented as blurring the whole game
+  world, not the window.
+- Visual deltas: single soft shadow (no stacked layers), accent-filled tab
+  chips with a sliding spring underline, position-based entrances (no
+  scale pops), Trace replaces all decorative effects, rows are ≥44px tall,
+  and phones get sheet mode automatically.
+- New opt-ins: `ShadowImage`, `Density`, `DisplayOrder`.
+
+---
+
 ## v4.4.0 — Prism: Pixel Fixes, Glow, Sound & Graphs
 
 A forensic design review of three live screenshots (vision-model audited)

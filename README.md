@@ -1,4 +1,4 @@
-# 👑 RezurXLib v4.4.0 "Aurora"
+# 👑 RezurXLib v5.0.0 "Trace"
 
 **A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
@@ -13,6 +13,13 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 ---
 
 ## ✨ What's New in v4.0 "Aurora"
+
+### ✨ Trace (v5.0.0) — the big one
+- **Geometry law**: concentric radii enforced in code, single-instance shadow, integer-pixel resting offsets, true pills, zero UIScale entrances — corners are clean at any zoom
+- **Motion engine**: interruptible velocity-preserving springs, exactly four motion tokens, a 12-spring budget cap, and a silent frame-time guard that degrades on slow hosts
+- **Aurora Trace**: one accent light travels the window border — entrance lap, tab-switch quarter-lap, success lap, error lap in red. Six competing effects deleted to make room
+- **Mobile first-class**: Compact/Comfortable density, near-fullscreen sheet mode under 500px, 44px touch targets, full ReducedMotion coverage
+- **Repo hygiene**: .env removed (rotate your DATABASE_URL), scaffold deleted, src/ modules + byte-identical build script, 167-test headless suite
 
 ### 🔮 Prism (v4.4.0)
 - **Pixel-perfect fixes** — status bar breathing room, clean minimize (no orange stripe), centered FPS divider, uniform section rules
@@ -140,7 +147,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 - **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
 - **Error-handled** — every callback wrapped in `pcall`
 - **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 142 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
+- **Headless-tested** — 167 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
 - **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
 - **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
 
@@ -199,7 +206,10 @@ _G.RezurXLib:CreateWindow({ Name = "Admin Panel" })
 | `KeySystem` / `KeySettings` | — | See above |
 | `ConfigurationSaving` | `table` | See above |
 | `Sounds` | `bool/table` | UI click sounds (v4.4) |
-| `BackdropBlur` | `boolean` | Frosted backdrop (v4.4) |
+| `BackdropBlur` | `boolean` | Blurs the whole game world (global), refcounted (v5) |
+| `ShadowImage` | `string` | Optional 9-slice shadow asset (v5) |
+| `Density` | `string` | `"compact"` / `"comfortable"` (v5) |
+| `DisplayOrder` | `number` | ScreenGui DisplayOrder (v5) |
 
 **Returns:** `Window` object
 

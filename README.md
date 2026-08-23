@@ -1,6 +1,6 @@
-# 👑 RezurXLib v4.0 "Aurora"
+# 👑 RezurXLib v4.0.1 "Aurora"
 
-**A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Glass + Glow** edition.
+**A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
 ---
 
@@ -14,17 +14,15 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 
 ## ✨ What's New in v4.0 "Aurora"
 
-### 🪟 Glass + Glow Visual Direction
-- **Layered depth shadows** — three stacked soft halos fake a gaussian blur without any image asset
-- **Frosted glass cards** — every panel gets a top-light sheen that dissolves downward
-- **Glass edge highlight** — a 1px gradient hairline catches light on the window's top edge
-- **Living header** — the title bar gradient slowly rocks back and forth, with a diagonal shimmer sweep gliding across every few seconds
-- **Spring entrance** — the window materializes with a soft scale-and-fade
-- **Staggered tab openings** — cards settle in one after another when you switch tabs
-- **Cursor glow** — an accent ambient light follows your pointer, brightens on press, and breathes at idle (desktop only)
-- **Primary button sheen** — a light band sweeps across accent buttons on hover and click
+### 🪟 Refined Depth & Motion (v4.0.1)
+- **Layered depth shadows** — three stacked soft halos hug the window tightly for a real gaussian-blur feel, no image assets. Dragging or resizing deepens the shadow so the window feels physically lifted
+- **Subtle accent rim** — a faint accent-tinted glow hugs the window edge for branded presence
+- **Spring entrance** — the window materializes with a gentle scale-and-fade
+- **Staggered tab openings** — cards settle softly in sequence when you switch tabs
 
-All of it respects `ReducedMotion` and `MotionScale`, and is on by default (`AnimatedAccents = false` to opt out, `CursorGlow = false` to disable the pointer light).
+All of it respects `ReducedMotion` and `MotionScale`. Ambient pulse loops (logo glow, glow-strip shimmer) are opt-in via `AnimatedAccents = true`.
+
+> **v4.0.1:** The cursor glow, frosted-glass card sheens, header shimmer sweeps, and button sheens from v4.0.0 were removed after feedback — they read as gimmicky. The look is now depth and restraint.
 
 ### 🖼️ Icon Support (Rayfield-style, no remote atlas)
 - `CreateWindow({ Icon = 4483362458 })` — number asset ids, `"rbxassetid://…"` / `"rbxasset://…"` / `"rbxthumb://…"` URIs, or emoji text in the header badge
@@ -84,7 +82,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 |-----------|-------------|
 | **Window** | Draggable, minimizable, closeable, resizable, spring entrance |
 | **Tabs** | Auto-sizing, scrollable, sliding indicator, image or emoji icons |
-| **Buttons** | Ripple feedback, sheen sweeps, hover states, callback error handling |
+| **Buttons** | Ripple feedback, hover states, callback error handling |
 | **Toggles** | Smooth slide animation, reset method |
 | **Sliders** | Throttled callbacks, live value display, increment snapping |
 | **Dropdowns** | Searchable, multi-select, fuzzy matching, mobile-keyboard safe |
@@ -166,8 +164,7 @@ _G.RezurXLib:CreateWindow({ Name = "Admin Panel" })
 | `LoadingTitle` | `string` | Loading screen wordmark |
 | `Size` | `{X, Y}` | Window size (default: 460x500) |
 | `Icon` | `number / string` | Asset id, rbx URI, or emoji text |
-| `AnimatedAccents` | `boolean` | Glass + Glow animations (default true) |
-| `CursorGlow` | `boolean` | Pointer ambience on desktop (default true) |
+| `AnimatedAccents` | `boolean` | Ambient pulse loops — logo glow & glow-strip shimmer (opt-in) |
 | `ReducedMotion` | `boolean` | Disable all animation |
 | `KeySystem` / `KeySettings` | — | See above |
 | `ConfigurationSaving` | `table` | See above |

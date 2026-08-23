@@ -1,5 +1,53 @@
 # Changelog
 
+## v4.0.1 — Feedback Pass on the Visual Direction
+
+User feedback on v4.0.0: the cursor glow was weird, the frosted-glass card
+sheens looked bad, and the always-running effects read as noise. This release
+removes the gimmicks and keeps the class.
+
+### Removed
+- **Cursor glow** (entire system): the three-ring accent light that followed
+  the pointer is gone — it read as a gimmicky blob rather than ambience.
+- **Frosted-glass card sheens**: the white top-light overlay on every element
+  panel washed out card colors on dark themes. Cards are back to the clean
+  two-stop surface gradient.
+- **Window glass edge highlight**: the 1px white gradient hairline inside the
+  window border.
+- **Header shimmer sweep**: the diagonal light band gliding across the title
+  bar every ~6 seconds.
+- **Living header gradient**: the slow back-and-forth rocking of the header
+  gradient's rotation — the header is a stable surface again.
+- **Primary-button sheen sweeps**: light bands no longer sweep across accent
+  buttons on hover/click; the ripple and color states remain.
+
+### Reverted
+- **`AnimatedAccents` is opt-in again** (v3 behavior, `= true` to enable).
+  With it on by default, the logo-glow pulse and glow-strip shimmer ran
+  constantly; now the resting UI is still unless you ask for motion.
+
+### Tuned
+- **Depth shadows tightened**: the three layers now hug the window (18/9/4px
+  pads at 93.5/88/78% transparency, up from 30/16/7px at ~95/92/84.5%) so the
+  shadow reads as real depth instead of a wide gray halo.
+- **Accent rim tightened**: the ambient accent glow shrank from a 70px halo
+  to a 26px rim hugging the window edge.
+- **Entrance softened**: 0.97→1.0 over 0.34s (was 0.94→1.0 over 0.42s) — a
+  whisper of motion instead of a pronounced pop.
+- **Stagger softened**: cards settle at 2% scale with a smooth Quint ease and
+  an 18ms cascade (was 3.5% with Back easing at 22ms) — an elegant settle,
+  not a bounce.
+
+### Kept
+- Layered shadows with drag/resize "lift" depth cue
+- Spring entrance and staggered tab openings (subtler now)
+- Click ripples, hover states, sliding tab indicator
+- All v4.0 features: icons, ConfigurationSaving, KeySystem, all 22 bug fixes
+
+Tests updated accordingly — 80/80 passing.
+
+---
+
 ## v4.0.0 "Aurora" — Glass + Glow Edition
 
 The largest release in RezurXLib history: a full visual overhaul, three flagship

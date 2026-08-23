@@ -1,10 +1,9 @@
 -- ============================================================
 -- RezurXLib v4.0 "Aurora" - self-contained Roblox UI library
 --
--- Glass + Glow edition: layered depth shadows, frosted surfaces,
--- animated gradient header, cursor glow, staggered entrances,
--- icon support, an optional key gate, and signature-diffed
--- auto-saving configuration files.
+-- Glass + Glow edition: layered depth shadows, a subtle accent rim,
+-- spring entrance, staggered tab openings, icon support, an optional
+-- key gate, and signature-diffed auto-saving configuration files.
 --
 -- Original implementation with tokenized themes, pointer-owned input,
 -- popup ownership, callback isolation, and no package dependency.
@@ -660,7 +659,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "4.0.0"
+Library.Version = "4.0.1"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -743,10 +742,10 @@ function Library:CreateWindow(cfg)
         local resizable = cfg.Resizable ~= false
         local accessibility = type(cfg.Accessibility) == "table" and cfg.Accessibility or {}
         local reducedMotion = cfg.ReducedMotion == true or accessibility.ReducedMotion == true or Library.Options.ReducedMotion == true
-        -- [v4.0] Animated accents now default ON (opt-out with AnimatedAccents = false).
-        -- They are the heartbeat of the Glass + Glow look and are all gated on
-        -- reducedMotion for accessibility.
-        local animatedAccents = cfg.AnimatedAccents ~= false and not reducedMotion
+        -- [v4.0.1] Animated accents are opt-in again (v3 behavior). The always-on
+        -- pulsing/shimmer loops read as noise; the premium feel now comes from
+        -- the layered shadows, entrance, and stagger — which are always on.
+        local animatedAccents = cfg.AnimatedAccents == true and not reducedMotion
         local motionScale = math.clamp(tonumber(cfg.MotionScale) or 1, 0.05, 3)
         local guiHost, hostInfo = resolveGuiHost(cfg)
         if not guiHost then
@@ -949,7 +948,7 @@ function Library:CreateWindow(cfg)
         WindowJanitor:Add(function() dragWatchdogConnection:Disconnect() end)
 
         -- [FIX v4.0] Forward-declared so helpers defined above this point
-        -- (ripple, dropdown portal math, cursor glow) capture the REAL local
+        -- (ripple, dropdown portal math) capture the REAL local
         -- instead of reading a nil global that silently fell back to scale 1.
         local uiScale = Instance.new("UIScale")
         uiScale.Scale = 1
@@ -1075,17 +1074,18 @@ function Library:CreateWindow(cfg)
         local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 24
 
         -- ------------------------------------------------------------
-        -- LAYERED DEPTH SHADOW (v4.0 "Glass + Glow")
+        -- LAYERED DEPTH SHADOW (v4.0)
         -- Three stacked, increasingly transparent halos fake a soft
         -- gaussian blur far better than one hard rectangle, without any
-        -- image asset. An accent-tinted rim layer gives the window a
-        -- branded "presence" on screen.
+        -- image asset. [v4.0.1] Tightened: the layers hug the window closer
+        -- and get darker toward it, so it reads as real depth instead of a
+        -- wide gray halo.
         -- ------------------------------------------------------------
         local shadowLayers = {}
         local shadowSpec = {
-                { pad = 30, transparency = 0.955, corner = R.outer + 22, z = 1 },
-                { pad = 16, transparency = 0.925, corner = R.outer + 11, z = 1 },
-                { pad = 7,  transparency = 0.845, corner = R.outer + 5,  z = 1 },
+                { pad = 18, transparency = 0.935, corner = R.outer + 13, z = 1 },
+                { pad = 9,  transparency = 0.880, corner = R.outer + 7,  z = 1 },
+                { pad = 4,  transparency = 0.780, corner = R.outer + 3,  z = 1 },
         }
         local shadow -- innermost layer doubles as the legacy `shadow` reference
         for specIndex, spec in ipairs(shadowSpec) do
@@ -1126,19 +1126,19 @@ function Library:CreateWindow(cfg)
                 end
         end
 
-        -- Faint accent-tinted ambient glow, wider than the shadow and mostly
-        -- transparent — gives the window a bit of branded "premium" presence
-        -- instead of sitting on a purely neutral gray shadow.
+        -- Faint accent-tinted ambient glow hugging the window edge — a subtle
+        -- branded rim rather than a wide colored halo. [v4.0.1] Tightened from
+        -- a 70px halo to a 26px rim so it reads as depth, not a blob.
         local ambientGlow = Instance.new("Frame")
         ambientGlow.Name = "AmbientGlow"
-        ambientGlow.Size = UDim2.new(0, WIN_W + 70, 0, WIN_H + 70)
-        ambientGlow.Position = UDim2.new(0.5, -(WIN_W + 70) / 2, 0.5, -(WIN_H + 70) / 2)
+        ambientGlow.Size = UDim2.new(0, WIN_W + 26, 0, WIN_H + 26)
+        ambientGlow.Position = UDim2.new(0.5, -(WIN_W + 26) / 2, 0.5, -(WIN_H + 26) / 2)
         ambientGlow.BackgroundColor3 = C.accent
         ambientGlow.BackgroundTransparency = 0.93
         ambientGlow.BorderSizePixel = 0
         ambientGlow.ZIndex = 1
         ambientGlow.Parent = screenGui
-        corner(ambientGlow, R.outer + 16)
+        corner(ambientGlow, R.outer + 8)
         onTheme(function()
                 Tween(ambientGlow, T20, { BackgroundColor3 = C.accent })
         end)
@@ -1165,30 +1165,8 @@ function Library:CreateWindow(cfg)
                 Tween(frameStroke, T20, { Color = C.borderAcc })
         end)
 
-        -- GLASS EDGE (v4.0): a 1px-inset hairline with a vertical white
-        -- gradient is the signature of frosted glass — light catches the
-        -- top edge and dissolves toward the bottom.
-        local glassEdge = Instance.new("Frame")
-        glassEdge.Name = "GlassEdge"
-        glassEdge.Size = UDim2.new(1, -2, 1, -2)
-        glassEdge.Position = UDim2.new(0, 1, 0, 1)
-        glassEdge.BackgroundTransparency = 0.90
-        glassEdge.BackgroundColor3 = C.white
-        glassEdge.BorderSizePixel = 0
-        glassEdge.ZIndex = 3
-        glassEdge.Parent = frame
-        corner(glassEdge, R.outer - 1)
-        local glassEdgeGrad = Instance.new("UIGradient")
-        glassEdgeGrad.Rotation = 90
-        glassEdgeGrad.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0.0, 0.10),
-                NumberSequenceKeypoint.new(0.35, 0.55),
-                NumberSequenceKeypoint.new(1.0, 0.92),
-        })
-        glassEdgeGrad.Parent = glassEdge
-
         -- ENTRANCE (v4.0): the window materializes with a soft spring —
-        -- scale up from 0.94 with a fade. Uses a window-local UIScale so it
+        -- a gentle scale-up with a fade. Uses a window-local UIScale so it
         -- composes with (never fights) the screen-level mobile uiScale.
         -- When the key gate is pending, the play is deferred until unlock.
         local runEntrance = nil
@@ -1202,27 +1180,24 @@ function Library:CreateWindow(cfg)
                 end
                 ambientGlow.BackgroundTransparency = 1
                 frame.BackgroundTransparency = 1
-                glassEdge.BackgroundTransparency = 1
                 frameStroke.Transparency = 1
                 runEntrance = function()
                         local ok = pcall(function()
-                                enterScale.Scale = 0.94
-                                Tween(enterScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                enterScale.Scale = 0.97
+                                Tween(enterScale, TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
                                         { Scale = 1 })
                                 for i = 1, #shadowLayers do
                                         Tween(shadowLayers[i], T40, { BackgroundTransparency = shadowSpec[i].transparency })
                                 end
                                 Tween(ambientGlow, T40, { BackgroundTransparency = 0.93 })
                                 Tween(frame, T40, { BackgroundTransparency = 0 })
-                                Tween(glassEdge, T40, { BackgroundTransparency = 0.90 })
                                 Tween(frameStroke, T40, { Transparency = 0.55 })
-                                task.wait(0.5)
+                                task.wait(0.45)
                                 if enterScale and enterScale.Parent then enterScale.Scale = 1 end
                         end)
                         if not ok and frame.Parent then
                                 -- Never leave a half-entranced window on screen.
                                 frame.BackgroundTransparency = 0
-                                glassEdge.BackgroundTransparency = 0.90
                                 frameStroke.Transparency = 0.55
                                 for i = 1, #shadowLayers do
                                         shadowLayers[i].BackgroundTransparency = shadowSpec[i].transparency
@@ -1437,57 +1412,6 @@ function Library:CreateWindow(cfg)
                         Tween(logoGlow, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
                                 { BackgroundTransparency = 0.97 })
                         task.wait(1.6)
-                end
-        end) end
-
-        -- HEADER SHIMMER SWEEP (v4.0): a soft diagonal light band glides
-        -- across the title bar every few seconds — the "animated gradient
-        -- header" of the Glass + Glow direction. Edges dissolve via the
-        -- gradient's transparency sequence so it never reads as a hard bar.
-        if animatedAccents then task.spawn(function()
-                local sweep = Instance.new("Frame")
-                sweep.Name = "HeaderSweep"
-                sweep.Size = UDim2.new(0, 130, 1.4, 0)
-                sweep.AnchorPoint = Vector2.new(0.5, 0.5)
-                sweep.Position = UDim2.new(-0.3, 0, 0.5, 0)
-                sweep.BackgroundColor3 = C.white
-                sweep.BackgroundTransparency = 0.78
-                sweep.BorderSizePixel = 0
-                sweep.Rotation = 12
-                sweep.ZIndex = 4 -- under the title/labels (ZIndex 5+)
-                sweep.Parent = header
-                corner(sweep, R.pill)
-                local sweepGrad = Instance.new("UIGradient")
-                sweepGrad.Rotation = 0
-                sweepGrad.Transparency = NumberSequence.new({
-                        NumberSequenceKeypoint.new(0.0, 1.0),
-                        NumberSequenceKeypoint.new(0.5, 0.10),
-                        NumberSequenceKeypoint.new(1.0, 1.0),
-                })
-                sweepGrad.Parent = sweep
-                onTheme(function() sweep.BackgroundColor3 = C.white end)
-                while header.Parent do
-                        if reducedMotion then break end
-                        sweep.Position = UDim2.new(-0.3, 0, 0.5, 0)
-                        Tween(sweep, TweenInfo.new(2.0, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                                { Position = UDim2.new(1.3, 0, 0.5, 0) })
-                        task.wait(6.4)
-                end
-        end) end
-
-        -- LIVING HEADER GRADIENT (v4.0): rock the header gradient's rotation
-        -- slowly back and forth so the surface reads as lit glass rather than
-        -- a static fill. TweenService tweens UIGradient.Rotation natively.
-        if animatedAccents then task.spawn(function()
-                while header.Parent do
-                        if reducedMotion then break end
-                        Tween(headerGrad, TweenInfo.new(6.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                                { Rotation = 124 })
-                        task.wait(6.5)
-                        if not header.Parent then break end
-                        Tween(headerGrad, TweenInfo.new(6.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                                { Rotation = 78 })
-                        task.wait(6.5)
                 end
         end) end
 
@@ -2164,7 +2088,7 @@ function Library:CreateWindow(cfg)
                                 shadowLayers[i].Position = startShadowPositions[i]
                         end
                         applyShadowBox(newW, newH)
-                        ambientGlow.Size = UDim2.new(0, newW + 70, 0, newH + 70)
+                        ambientGlow.Size = UDim2.new(0, newW + 26, 0, newH + 26)
                         if not minimized then
                                 body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
                         end
@@ -2205,86 +2129,6 @@ function Library:CreateWindow(cfg)
                 end
         end
         WindowJanitor:Add(closeCurrentPopup)
-
-        -- ------------------------------------------------------------
-        -- CURSOR GLOW (v4.0) — ambient accent light under the pointer.
-        -- Desktop-only (needs a mouse); auto-disabled with reduced motion.
-        -- Three nested circles at rising transparency fake a soft radial
-        -- falloff without any image asset. Pressing brightens it, releasing
-        -- settles it back; a slow breathing loop keeps it alive at idle.
-        -- ------------------------------------------------------------
-        local cursorGlowRoot = nil
-        if UserInputService.MouseEnabled and cfg.CursorGlow ~= false and not reducedMotion then
-                cursorGlowRoot = Instance.new("Frame")
-                cursorGlowRoot.Name = "CursorGlow"
-                cursorGlowRoot.Size = UDim2.fromOffset(132, 132)
-                cursorGlowRoot.AnchorPoint = Vector2.new(0.5, 0.5)
-                cursorGlowRoot.BackgroundTransparency = 1
-                cursorGlowRoot.Visible = false
-                cursorGlowRoot.ZIndex = 2 -- beneath popups/notifications/tooltips
-                cursorGlowRoot.Parent = overlayGui
-                local glowRings = {}
-                local ringSpec = {
-                        { size = 1.00, transparency = 0.955 },
-                        { size = 0.60, transparency = 0.940 },
-                        { size = 0.32, transparency = 0.915 },
-                }
-                for ringIndex = 1, #ringSpec do
-                        local spec = ringSpec[ringIndex]
-                        local ring = Instance.new("Frame")
-                        ring.Name = "GlowRing" .. ringIndex
-                        ring.Size = UDim2.fromScale(spec.size, spec.size)
-                        ring.AnchorPoint = Vector2.new(0.5, 0.5)
-                        ring.Position = UDim2.fromScale(0.5, 0.5)
-                        ring.BackgroundColor3 = C.accent
-                        ring.BackgroundTransparency = spec.transparency
-                        ring.BorderSizePixel = 0
-                        ring.ZIndex = 2
-                        ring.Parent = cursorGlowRoot
-                        corner(ring, UDim.new(1, 0))
-                        table.insert(glowRings, { frame = ring, rest = spec.transparency })
-                end
-                onTheme(function()
-                        for _, ring in ipairs(glowRings) do ring.frame.BackgroundColor3 = C.accent end
-                end)
-                WindowJanitor:Add(UserInputService.InputChanged:Connect(function(input)
-                        if input.UserInputType == Enum.UserInputType.MouseMovement then
-                                if not cursorGlowRoot.Parent then return end
-                                if not cursorGlowRoot.Visible then cursorGlowRoot.Visible = true end
-                                cursorGlowRoot.Position = UDim2.new(0, input.Position.X, 0, input.Position.Y)
-                        end
-                end))
-                WindowJanitor:Add(UserInputService.InputBegan:Connect(function(input)
-                        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-                        if not cursorGlowRoot.Parent then return end
-                        for _, ring in ipairs(glowRings) do
-                                Tween(ring.frame, T10, { BackgroundTransparency = math.max(ring.rest - 0.16, 0.5) })
-                        end
-                end))
-                WindowJanitor:Add(UserInputService.InputEnded:Connect(function(input)
-                        if input.UserInputType ~= Enum.UserInputType.MouseButton1 then return end
-                        if not cursorGlowRoot.Parent then return end
-                        for _, ring in ipairs(glowRings) do
-                                Tween(ring.frame, T20, { BackgroundTransparency = ring.rest })
-                        end
-                end))
-                if animatedAccents then task.spawn(function()
-                        while cursorGlowRoot.Parent do
-                                if reducedMotion then break end
-                                for _, ring in ipairs(glowRings) do
-                                        Tween(ring.frame, TweenInfo.new(2.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                                                { BackgroundTransparency = ring.rest + 0.012 })
-                                end
-                                task.wait(2.4)
-                                if not cursorGlowRoot.Parent then break end
-                                for _, ring in ipairs(glowRings) do
-                                        Tween(ring.frame, TweenInfo.new(2.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-                                                { BackgroundTransparency = ring.rest })
-                                end
-                                task.wait(2.4)
-                        end
-                end) end
-        end
 
         -- ------------------------------------------------------------
         -- NOTIFICATIONS
@@ -2498,7 +2342,7 @@ function Library:CreateWindow(cfg)
                         for i = 1, #shadowLayers do
                                 Tween(shadowLayers[i], TMIN, { Size = UDim2.new(0, WIN_W + shadowSpec[i].pad * 2, 0, HEADER_H + shadowSpec[i].pad * 2) })
                         end
-                        Tween(ambientGlow, TMIN, { Size = UDim2.new(0, WIN_W + 70, 0, HEADER_H + 70) })
+                        Tween(ambientGlow, TMIN, { Size = UDim2.new(0, WIN_W + 26, 0, HEADER_H + 26) })
                         Tween(minGlyph, T20, { Rotation = 180 })
                 else
                         tabBar.Visible = true
@@ -2511,7 +2355,7 @@ function Library:CreateWindow(cfg)
                         for i = 1, #shadowLayers do
                                 Tween(shadowLayers[i], TMIN, { Size = UDim2.new(0, WIN_W + shadowSpec[i].pad * 2, 0, WIN_H + shadowSpec[i].pad * 2) })
                         end
-                        Tween(ambientGlow, TMIN, { Size = UDim2.new(0, WIN_W + 70, 0, WIN_H + 70) })
+                        Tween(ambientGlow, TMIN, { Size = UDim2.new(0, WIN_W + 26, 0, WIN_H + 26) })
                         Tween(minGlyph, T20, { Rotation = 0 })
                 end
                 return minimized
@@ -2546,7 +2390,6 @@ function Library:CreateWindow(cfg)
                         frame.Visible = false
                         setShadowVisible(false)
                         ambientGlow.Visible = false
-                        if cursorGlowRoot then cursorGlowRoot.Visible = false end
                         floatIcon.Visible = true
                 else
                         floatIcon.Visible = false
@@ -2913,6 +2756,8 @@ function Library:CreateWindow(cfg)
                         -- another when a tab opens. UIScale per element means
                         -- the UIListLayout keeps owning positions — nothing
                         -- fights the layout. Capped so giant pages don't drag.
+                        -- [v4.0.1] Softened: 2% scale with a smooth Quint ease
+                        -- reads as an elegant settle, not a bounce.
                         if not reducedMotion then
                                 local cards = {}
                                 for _, child in ipairs(page:GetChildren()) do
@@ -2924,7 +2769,7 @@ function Library:CreateWindow(cfg)
                                 end
                                 for index = 1, math.min(#cards, 16) do
                                         local card = cards[index]
-                                        task.delay((index - 1) * 0.022, function()
+                                        task.delay((index - 1) * 0.018, function()
                                                 if not card.Parent or not tab.Page.Visible then return end
                                                 local es = card:FindFirstChild("_StaggerScale")
                                                 if not es then
@@ -2932,8 +2777,8 @@ function Library:CreateWindow(cfg)
                                                         es.Name = "_StaggerScale"
                                                         es.Parent = card
                                                 end
-                                                es.Scale = 0.965
-                                                Tween(es, TweenInfo.new(0.30, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                                es.Scale = 0.98
+                                                Tween(es, TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
                                                         { Scale = 1 })
                                         end)
                                 end
@@ -3002,25 +2847,6 @@ function Library:CreateWindow(cfg)
                                 ColorSequenceKeypoint.new(0, C.panelAlt),
                                 ColorSequenceKeypoint.new(1, C.panel),
                         }), 90)
-                        -- GLASS SHEEN (v4.0): a soft top-light that dissolves
-                        -- downward — the frosted-glass signature on every card.
-                        -- ZIndex 0 keeps it beneath all content siblings.
-                        local sheen = Instance.new("Frame")
-                        sheen.Name = "GlassSheen"
-                        sheen.Size = UDim2.new(1, 0, 0, math.clamp(math.floor(h * 0.55), 12, 38))
-                        sheen.BackgroundColor3 = C.white
-                        sheen.BackgroundTransparency = 0.90
-                        sheen.BorderSizePixel = 0
-                        sheen.ZIndex = 0
-                        sheen.Parent = holder
-                        corner(sheen, R.panel)
-                        local sheenGrad = Instance.new("UIGradient")
-                        sheenGrad.Rotation = 90
-                        sheenGrad.Transparency = NumberSequence.new({
-                                NumberSequenceKeypoint.new(0.0, 0.05),
-                                NumberSequenceKeypoint.new(1.0, 1.0),
-                        })
-                        sheenGrad.Parent = sheen
                         onTheme(function()
                                 surfaceGradient.Color = ColorSequence.new({
                                         ColorSequenceKeypoint.new(0, C.panelAlt),
@@ -3326,43 +3152,11 @@ function Library:CreateWindow(cfg)
                         corner(b, R.panel)
                         local strk = stroke(b, primary and C.accentDim or C.border, 1)
                         local buttonGradient = nil
-                        local runSheen = nil
                         if primary then
                                 buttonGradient = gradient(b, ColorSequence.new{
                                         ColorSequenceKeypoint.new(0.0, C.accentDim),
                                         ColorSequenceKeypoint.new(1.0, C.accentDark),
                                 }, 100)
-                                -- SHEEN SWEEP (v4.0): a diagonal light band glides across
-                                -- primary buttons on hover and click — same language as
-                                -- the header sweep, at button scale.
-                                local sweep = Instance.new("Frame")
-                                sweep.Name = "SheenSweep"
-                                sweep.Size = UDim2.new(0, 42, 1.6, 0)
-                                sweep.AnchorPoint = Vector2.new(0.5, 0.5)
-                                sweep.Position = UDim2.new(-0.35, 0, 0.5, 0)
-                                sweep.BackgroundColor3 = C.white
-                                sweep.BackgroundTransparency = 0.68
-                                sweep.BorderSizePixel = 0
-                                sweep.Rotation = 14
-                                sweep.ZIndex = 3
-                                sweep.Parent = b
-                                corner(sweep, R.pill)
-                                local sweepGrad = Instance.new("UIGradient")
-                                sweepGrad.Transparency = NumberSequence.new({
-                                        NumberSequenceKeypoint.new(0.0, 1.0),
-                                        NumberSequenceKeypoint.new(0.5, 0.06),
-                                        NumberSequenceKeypoint.new(1.0, 1.0),
-                                })
-                                sweepGrad.Parent = sweep
-                                local sweeping = false
-                                runSheen = function()
-                                        if sweeping or reducedMotion or not b.Parent then return end
-                                        sweeping = true
-                                        sweep.Position = UDim2.new(-0.35, 0, 0.5, 0)
-                                        Tween(sweep, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
-                                                { Position = UDim2.new(1.3, 0, 0.5, 0) })
-                                        task.delay(0.7, function() sweeping = false end)
-                                end
                         end
 
                         local lbl = Instance.new("TextLabel")
@@ -3389,7 +3183,6 @@ function Library:CreateWindow(cfg)
                         arr.Parent = b
 
                         b.MouseEnter:Connect(function()
-                                if runSheen then runSheen() end
                                 Tween(b, T20, { BackgroundColor3 = primary and C.accentDim or C.panelHov })
                                 Tween(strk, T20, { Color = primary and C.accentHi or C.accentDim })
                                 Tween(arr, T20, { TextColor3 = primary and C.white or C.accent, Position = UDim2.new(1, -18, 0, 0) })
@@ -3400,7 +3193,6 @@ function Library:CreateWindow(cfg)
                                 Tween(arr, T20, { TextColor3 = primary and C.accentHi or C.muted, Position = UDim2.new(1, -22, 0, 0) })
                         end)
                         b.Activated:Connect(function()
-                                if runSheen then runSheen() end
                                 ripple(b, b.AbsoluteSize.X - 30, b.AbsoluteSize.Y / 2, C.accent)
                                 Tween(b, T20, { BackgroundColor3 = C.accentDim })
                                 Tween(lbl, T20, { TextColor3 = C.white })
@@ -6569,7 +6361,7 @@ function Library:CreateWindow(cfg)
                         body.Size = UDim2.new(1, 0, 0, newH - HEADER_H)
                         applyShadowBox(newW, newH)
                 end
-                ambientGlow.Size = UDim2.new(0, newW + 70, 0, (minimized and HEADER_H or newH) + 70)
+                ambientGlow.Size = UDim2.new(0, newW + 26, 0, (minimized and HEADER_H or newH) + 26)
                 updateScale()
                 local x, y = clampWindowPosition(pinned.X, pinned.Y)
                 moveWindowTo(x, y)
@@ -7272,7 +7064,6 @@ function Library:CreateWindow(cfg)
                         frame.Visible = false
                         setShadowVisible(false)
                         ambientGlow.Visible = false
-                        if cursorGlowRoot then cursorGlowRoot.Visible = false end
 
                         local gateJanitor = Janitor.new()
                         WindowJanitor:Add(function() gateJanitor:Cleanup() end)
@@ -7789,8 +7580,7 @@ function Library:GetDocs()
                         { Name = "Icon Support", Params = "Window Icon / tab icon / element Icon: number asset id, rbxassetid:// URI, or emoji text", Returns = "", Description = "Rayfield-style asset icons on the topbar badge, tabs, and every core element — with emoji fallback, no remote icon atlas required." },
                         { Name = "ConfigurationSaving", Params = "Enabled, FolderName, FileName, Autosave, SaveOnUnload, Notify", Returns = "", Description = "Auto-saves flagged elements to JSON on the executor filesystem. Signature-diffed writes (no rewrite storms), per-window isolation, load-replay on boot, flush on destroy." },
                         { Name = "KeySystem", Params = "KeySettings = Title, Subtitle, Note, FileName, SaveKey, GrabKeyFromSite, Key, MaxAttempts, OnExhausted", Returns = "", Description = "Styled key gate shown before the window. Exact-match validation, elastic shake on wrong keys, saved-key skip, optional HTTP key fetch, Lock/Kick/None on exhaustion." },
-                        { Name = "Cursor Glow", Params = "CursorGlow = true (desktop default)", Returns = "", Description = "Accent ambient light under the pointer; brightens on press, breathes at idle." },
-                        { Name = "Glass + Glow visuals", Params = "AnimatedAccents = true (default)", Returns = "", Description = "Layered depth shadows, frosted-glass card sheens, animated gradient header with shimmer sweep, spring entrance, and staggered tab-open animations." },
+                        { Name = "Glass + Glow visuals", Params = "AnimatedAccents = true (opt-in ambient loops)", Returns = "", Description = "Layered depth shadows with a subtle accent rim, spring entrance, staggered tab-open settles, and drag-lift depth. Ambient pulse loops are opt-in." },
                 },
         }
 end

@@ -1,4 +1,4 @@
-# 👑 RezurXLib v4.1.0 "Aurora"
+# 👑 RezurXLib v4.2.0 "Aurora"
 
 **A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
@@ -13,6 +13,14 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 ---
 
 ## ✨ What's New in v4.0 "Aurora"
+
+### 🎰 The Jackpot Entrance (v4.2.0)
+- **Spring landing** — the window pops in with a Back overshoot; it *lands*, not fades
+- **Accent-line ignition** — the header strip sweeps on like a lightsaber
+- **One-shot shockwave** — an accent ring bursts from behind the window and dissipates
+- **Reward cascade** — every card pops with an accent stroke flash; the page rises into place
+- **Reveal pop** — toggling the menu open replays the spring + cascade every time
+- **Concentric curves** — shadow layers, accent rim, and glow now follow the parallel-curve law; pills are true pills
 
 ### 🪟 Refined Depth & Motion (v4.0.1)
 - **Layered depth shadows** — three stacked soft halos hug the window tightly for a real gaussian-blur feel, no image assets. Dragging or resizing deepens the shadow so the window feels physically lifted
@@ -114,7 +122,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 - **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
 - **Error-handled** — every callback wrapped in `pcall`
 - **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 92 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
+- **Headless-tested** — 106 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
 - **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
 - **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
 

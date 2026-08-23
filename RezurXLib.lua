@@ -66,7 +66,20 @@ local TTOGGLEBG = TweenInfo.new(0.30, Enum.EasingStyle.Exponential, Enum.EasingD
 -- ============================================================
 -- SHARED CORNER RADII
 -- ============================================================
-local R = { outer = 20, panel = 12, control = 10, small = 7, pill = 6, tab = 9 }
+local R = {
+        outer  = 20,  -- window shell
+        panel  = 12,  -- cards / popups
+        control = 10, -- buttons / inputs
+        small  = 8,   -- chips / icon tiles (was 7 — unified)
+        pill   = 12,  -- TRUE pill: half of the standard 24px pill height (was 6 — read as a square chip)
+        tab    = 10,  -- tab chips (was 9 — unified with control)
+}
+-- CURVE LAW (v4.2.0): for a layer that extends `pad` px beyond a rounded
+-- rect on every side, the concentric (parallel-curve) radius is
+-- r + pad. The old shadow radii ignored this, pinching every corner.
+local function concentric(radius, pad)
+        return radius + pad
+end
 
 -- ============================================================
 -- THEMES — full token sets. "Ember" is the original RezurXlab
@@ -659,7 +672,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "4.1.0"
+Library.Version = "4.2.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -1083,9 +1096,12 @@ function Library:CreateWindow(cfg)
         -- ------------------------------------------------------------
         local shadowLayers = {}
         local shadowSpec = {
-                { pad = 18, transparency = 0.935, corner = R.outer + 13, z = 1 },
-                { pad = 9,  transparency = 0.880, corner = R.outer + 7,  z = 1 },
-                { pad = 4,  transparency = 0.780, corner = R.outer + 3,  z = 1 },
+                -- [v4.2.0] Radii are now CONCENTRIC (r + pad). The old +13/+7/+3
+                -- values under-curved each layer, pinching the corners into a
+                -- visible stepped wedge instead of a smooth parallel curve.
+                { pad = 18, transparency = 0.935, corner = concentric(R.outer, 18), z = 1 },
+                { pad = 9,  transparency = 0.880, corner = concentric(R.outer, 9),  z = 1 },
+                { pad = 4,  transparency = 0.780, corner = concentric(R.outer, 4),  z = 1 },
         }
         local shadow -- innermost layer doubles as the legacy `shadow` reference
         for specIndex, spec in ipairs(shadowSpec) do
@@ -1138,7 +1154,7 @@ function Library:CreateWindow(cfg)
         ambientGlow.BorderSizePixel = 0
         ambientGlow.ZIndex = 1
         ambientGlow.Parent = screenGui
-        corner(ambientGlow, R.outer + 8)
+        corner(ambientGlow, concentric(R.outer, 13))
         onTheme(function()
                 Tween(ambientGlow, T20, { BackgroundColor3 = C.accent })
         end)
@@ -1165,10 +1181,16 @@ function Library:CreateWindow(cfg)
                 Tween(frameStroke, T20, { Color = C.borderAcc })
         end)
 
-        -- ENTRANCE (v4.0): the window materializes with a soft spring —
-        -- a gentle scale-up with a fade. Uses a window-local UIScale so it
-        -- composes with (never fights) the screen-level mobile uiScale.
-        -- When the key gate is pending, the play is deferred until unlock.
+        -- ENTRANCE (v4.2.0 "jackpot" choreography):
+        --   1. the window springs in with a Back overshoot (it LANDS, not fades)
+        --   2. the header accent line ignites left→right like a lightsaber
+        --   3. a one-shot accent shockwave expands from behind the window
+        -- Uses a window-local UIScale so it composes with (never fights) the
+        -- screen-level mobile uiScale. When the key gate is pending, the play
+        -- is deferred until unlock — the gate resolution becomes a reward.
+        -- glowStrip is FORWARD-DECLARED here because the ignition sequence
+        -- runs before the strip is created below (closure-scope rule).
+        local glowStrip = nil
         local runEntrance = nil
         do
                 local enterScale = Instance.new("UIScale")
@@ -1183,15 +1205,41 @@ function Library:CreateWindow(cfg)
                 frameStroke.Transparency = 1
                 runEntrance = function()
                         local ok = pcall(function()
-                                enterScale.Scale = 0.97
-                                Tween(enterScale, TweenInfo.new(0.34, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                -- 1. Spring landing with overshoot
+                                enterScale.Scale = 0.92
+                                Tween(enterScale, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
                                         { Scale = 1 })
                                 for i = 1, #shadowLayers do
                                         Tween(shadowLayers[i], T40, { BackgroundTransparency = shadowSpec[i].transparency })
                                 end
                                 Tween(ambientGlow, T40, { BackgroundTransparency = 0.93 })
-                                Tween(frame, T40, { BackgroundTransparency = 0 })
-                                Tween(frameStroke, T40, { Transparency = 0.55 })
+                                Tween(frame, T30, { BackgroundTransparency = 0 })
+                                Tween(frameStroke, T30, { Transparency = 0.55 })
+                                if not reducedMotion then
+                                        -- 2. Accent-line ignition under the header
+                                        glowStrip.Size = UDim2.new(0, 0, 0, 3)
+                                        Tween(glowStrip, TweenInfo.new(0.42, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                                { Size = UDim2.new(1, 0, 0, 3) })
+                                        -- 3. One-shot shockwave from behind the window
+                                        local ring = Instance.new("Frame")
+                                        ring.Name = "EntranceShockwave"
+                                        ring.AnchorPoint = Vector2.new(0.5, 0.5)
+                                        ring.Position = UDim2.new(0.5, 0, 0.5, 0)
+                                        ring.Size = UDim2.fromOffset(WIN_W * 0.55, WIN_H * 0.55)
+                                        ring.BackgroundColor3 = C.accent
+                                        ring.BackgroundTransparency = 0.88
+                                        ring.BorderSizePixel = 0
+                                        ring.ZIndex = 1 -- above shadows, below the frame
+                                        ring.Parent = screenGui
+                                        corner(ring, UDim.new(1, 0))
+                                        Tween(ring, TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+                                                Size = UDim2.fromOffset(WIN_W * 1.35, WIN_H * 1.35),
+                                                BackgroundTransparency = 1,
+                                        })
+                                        task.delay(0.62, function()
+                                                if ring.Parent then ring:Destroy() end
+                                        end)
+                                end
                                 task.wait(0.45)
                                 if enterScale and enterScale.Parent then enterScale.Scale = 1 end
                         end)
@@ -1199,13 +1247,16 @@ function Library:CreateWindow(cfg)
                                 -- Never leave a half-entranced window on screen.
                                 frame.BackgroundTransparency = 0
                                 frameStroke.Transparency = 0.55
+                                if glowStrip then glowStrip.Size = UDim2.new(1, 0, 0, 3) end
                                 for i = 1, #shadowLayers do
                                         shadowLayers[i].BackgroundTransparency = shadowSpec[i].transparency
                                 end
                                 ambientGlow.BackgroundTransparency = 0.93
                         end
                 end
-                if not keyGatePending then task.spawn(runEntrance) end
+                -- NOTE: the spawn is deferred to AFTER glowStrip is created below
+                -- (task.spawn runs the coroutine synchronously up to its first
+                -- yield, which would beat the assignment and read a nil strip).
         end
 
         local body = Instance.new("Frame")
@@ -1219,7 +1270,8 @@ function Library:CreateWindow(cfg)
 
         -- Glow strip under the header — gradient refs captured for the
         -- theme system (gradients need direct updates, not re-creation).
-        local glowStrip = Instance.new("Frame")
+        -- (Declared above as a forward local; assigned here.)
+        glowStrip = Instance.new("Frame")
         glowStrip.Size = UDim2.new(1, 0, 0, 3)
         glowStrip.Position = UDim2.new(0, 0, 0, HEADER_H - 3)
         glowStrip.BackgroundColor3 = C.accent
@@ -1239,6 +1291,8 @@ function Library:CreateWindow(cfg)
                         ColorSequenceKeypoint.new(1.0, C.accentDim),
                 }
         end)
+        -- Now that every element the entrance touches exists, play it.
+        if not keyGatePending then task.spawn(runEntrance) end
         if animatedAccents then task.spawn(function()
                 local shimmer = Instance.new("Frame")
                 shimmer.Size = UDim2.new(0, 60, 1, 0)
@@ -2396,6 +2450,10 @@ function Library:CreateWindow(cfg)
         -- the upvalues here lets hiding the window clean every portal layer.
         local closeCommandPalette = function() end
         local closeModal = function() end
+        -- [v4.2.0] Forward-declared: setHidden (defined before CreateTab)
+        -- uses this to replay the card cascade when the window is revealed.
+        -- Assigned its real implementation once ActiveTab exists below.
+        local replayRevealCascade = function() end
         local hidden = false
         local function setHidden(h)
                 hidden = h
@@ -2416,6 +2474,18 @@ function Library:CreateWindow(cfg)
                                 tabBar.Visible = true
                                 content.Visible = true
                                 statusBar.Visible = true
+                        end
+                        -- [v4.2.0] REVEAL POP: every re-show (toggle key, float
+                        -- icon tap) lands with a spring and a fresh cascade —
+                        -- opening the menu should feel like a reward every time.
+                        if not reducedMotion then
+                                local es = frame:FindFirstChild("EntranceScale")
+                                if es then
+                                        es.Scale = 0.96
+                                        Tween(es, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                                { Scale = 1 })
+                                end
+                                task.defer(replayRevealCascade)
                         end
                 end
         end
@@ -2495,20 +2565,31 @@ function Library:CreateWindow(cfg)
                 task.delay(2.5, clearOverlay) -- hard watchdog
                 task.spawn(function()
                         local ok, err = pcall(function()
-                                Tween(loadWordmark, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                -- [v4.2.0] Wordmark pops in (scale, not just fade) and
+                                -- the whole sequence is tighter (~0.75s): anticipation
+                                -- without dragging, so the reveal lands sooner.
+                                local markScale = Instance.new("UIScale")
+                                markScale.Scale = 1
+                                markScale.Parent = loadWordmark
+                                if not reducedMotion then
+                                        markScale.Scale = 0.88
+                                        Tween(markScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                                                { Scale = 1 })
+                                end
+                                Tween(loadWordmark, TweenInfo.new(0.22, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
                                         { TextTransparency = 0 })
                                 Tween(loadBarBg, T20, { BackgroundTransparency = 0 })
                                 Tween(loadBarFill, T20, { BackgroundTransparency = 0 })
-                                task.wait(0.12)
-                                Tween(loadBarFill, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                task.wait(0.1)
+                                Tween(loadBarFill, TweenInfo.new(0.38, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
                                         { Size = UDim2.new(1, 0, 1, 0) })
-                                task.wait(0.5)
+                                task.wait(0.42)
                                 Tween(loadWordmark, T15, { TextTransparency = 1 })
                                 Tween(loadBarBg, T15, { BackgroundTransparency = 1 })
                                 Tween(loadBarFill, T15, { BackgroundTransparency = 1 })
-                                task.wait(0.1)
+                                task.wait(0.08)
                                 Tween(loadingOverlay, T20, { BackgroundTransparency = 1 })
-                                task.wait(0.2)
+                                task.wait(0.15)
                         end)
                         if not ok then
                                 warn("[RezurXLib] loading overlay error: " .. tostring(err))
@@ -2546,6 +2627,11 @@ function Library:CreateWindow(cfg)
         -- ============================================================
         local Tabs = {}
         local ActiveTab = nil
+        replayRevealCascade = function()
+                if ActiveTab and ActiveTab._setActive then
+                        pcall(ActiveTab._setActive, true)
+                end
+        end
         local keyboardAdjusters = setmetatable({}, { __mode = "k" })
 
         -- Keyboard focus is opt-in per interactive control (Selectable = true)
@@ -2768,12 +2854,12 @@ function Library:CreateWindow(cfg)
                         Tween(chipStroke, T20, { Transparency = 1 })
                         Tween(textLbl, T20, { TextColor3 = C.accentHi })
                         moveIndicatorTo(btn, not skipAnim)
-                        -- STAGGER ENTRANCE (v4.0): cards settle in one after
-                        -- another when a tab opens. UIScale per element means
-                        -- the UIListLayout keeps owning positions — nothing
-                        -- fights the layout. Capped so giant pages don't drag.
-                        -- [v4.0.1] Softened: 2% scale with a smooth Quint ease
-                        -- reads as an elegant settle, not a bounce.
+                        -- CARD CASCADE (v4.2.0 "dopamine" pop): every card pops
+                        -- in with a Back overshoot AND its stroke flashes the
+                        -- accent color as it lands — a reward cascade. UIScale
+                        -- per element keeps the UIListLayout owning positions.
+                        -- The whole page also rises into place. Capped so
+                        -- giant pages don't drag.
                         if not reducedMotion then
                                 local cards = {}
                                 for _, child in ipairs(page:GetChildren()) do
@@ -2783,9 +2869,12 @@ function Library:CreateWindow(cfg)
                                                 end
                                         end
                                 end
+                                page.Position = UDim2.new(0, 0, 0, 12)
+                                Tween(page, TweenInfo.new(0.34, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+                                        { Position = UDim2.new(0, 0, 0, 0) })
                                 for index = 1, math.min(#cards, 16) do
                                         local card = cards[index]
-                                        task.delay((index - 1) * 0.018, function()
+                                        task.delay((index - 1) * 0.026, function()
                                                 if not card.Parent or not tab.Page.Visible then return end
                                                 local es = card:FindFirstChild("_StaggerScale")
                                                 if not es then
@@ -2793,9 +2882,17 @@ function Library:CreateWindow(cfg)
                                                         es.Name = "_StaggerScale"
                                                         es.Parent = card
                                                 end
-                                                es.Scale = 0.98
-                                                Tween(es, TweenInfo.new(0.24, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                                es.Scale = 0.94
+                                                Tween(es, TweenInfo.new(0.32, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
                                                         { Scale = 1 })
+                                                -- Accent stroke flash as the card lands.
+                                                local cardStroke = card:FindFirstChildOfClass("UIStroke")
+                                                if cardStroke then
+                                                        local origColor = cardStroke.Color
+                                                        cardStroke.Color = C.accentDim
+                                                        Tween(cardStroke, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+                                                                { Color = origColor })
+                                                end
                                         end)
                                 end
                         end
@@ -7192,7 +7289,7 @@ function Library:CreateWindow(cfg)
                         cardGlow.ZIndex = 30
                         cardGlow.Parent = overlayGui
                         gateJanitor:Add(cardGlow, "Destroy")
-                        corner(cardGlow, R.outer + 8)
+                        corner(cardGlow, concentric(R.outer, 12))
 
                         local gateScale = Instance.new("UIScale")
                         gateScale.Scale = 0.94

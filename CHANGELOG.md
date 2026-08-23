@@ -1,5 +1,53 @@
 # Changelog
 
+## v4.2.0 — True Curves & the Jackpot Entrance
+
+Two directives from the field: the curves were wrong, and opening the menu
+should feel like pure dopamine. Both delivered.
+
+### Curves fixed (geometrically)
+- **Concentric shadow layers**: a layer extending `pad` px beyond a rounded
+  rect must use radius `r + pad` (the parallel-curve law). The old values
+  (+13/+7/+3 for pads 18/9/4) under-curved every layer, pinching the
+  window's corners into a stepped wedge. Now +18/+9/+4 — the shadow flows
+  in a smooth parallel curve off the window edge.
+- **Ambient accent rim** made concentric (+13 for its 13px pad; was +8).
+- **Key-gate card glow** made concentric (+12 for its 12px pad; was +8).
+- **True pills**: keybind and bindable pills now use radius 12 (half the
+  24px pill height; was 6 — they read as square chips). Roblox clamps the
+  radius to half-height, so the 20px bindable pill rounds perfectly too.
+- **Unified radius scale**: `small` 7→8, `tab` 9→10, aligned with
+  `control` 10 — one consistent curve language across every element.
+
+### The Jackpot entrance (dopamine choreography)
+- **Spring landing**: the window now enters at 0.92 scale with a Back
+  overshoot — it *lands*, it doesn't fade (was a whisper-soft 0.97 Quint).
+- **Accent-line ignition**: the gradient strip under the header sweeps
+  from 0 to full width like a lightsaber ignition the moment the window
+  arrives.
+- **One-shot shockwave**: an accent ring expands from behind the window
+  and dissipates (0.55s, self-cleaning) — the "jackpot" burst.
+- **Reward cascade on every tab open**: cards now pop at 0.94 with a Back
+  overshoot (was a subtle 0.98 Quint settle), each card's stroke **flashes
+  the accent color** as it lands, and the whole page rises 12px into place.
+- **Reveal pop**: re-showing the window (toggle key, float icon tap)
+  replays a spring landing plus a fresh card cascade — opening the menu
+  is a reward every single time, not just the first.
+- **Snappier loading**: wordmark now pops in with a scale bounce, and the
+  whole sequence tightened to ~0.75s so the reveal lands sooner.
+- Key-gate unlock plays the full entrance — entering a correct key feels
+  like winning.
+
+All new motion respects `ReducedMotion` (skipped entirely when set), and
+the shockwave/ignition are one-shot — no idle loops.
+
+### Verified
+- New tests: concentric radii for all three shadow layers + ambient rim,
+  shockwave self-cleanup, glow-strip ignition end-state, reveal-pop settle,
+  page-rise rest position, true-pill radius. **106/106 passing.**
+
+---
+
 ## v4.1.0 — Smoothness & Final Polish
 
 The final pass: one real performance fix, snappier interactions, and entrance

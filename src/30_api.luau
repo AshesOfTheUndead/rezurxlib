@@ -204,6 +204,7 @@ function Library:GetDocs()
                         { Name = "CreateContextMenu", Params = "Name, ButtonText, Items, Tooltip, Flag", Returns = ":Open, :Close, :SetItems", Description = "On-demand action menu." },
                         { Name = "CreateStatus", Params = "Title, Text, State, Detail, Value, Flag", Returns = ":Set, :Get", Description = "Status indicator." },
                         { Name = "CreateGraph", Params = "Name, Max, Bars, Height, Suffix, Sample, RefreshRate, Tooltip, Flag", Returns = ":Push, :Reset, :SetMax, :Get", Description = "[v4.4] Live sparkline graph: push values (or auto-sample) and watch the trend scroll." },
+                        { Name = "AddStatGrid", Params = "Columns, UpdateRate, ChipHeight, Flag, Tooltip", Returns = ":AddChip, :UpdateChip, :RemoveChip, :GetChipCount", Description = "[v5.2] Universal telemetry grid: auto-wrapping metric chips (Icon/Label/Value) with live UpdateChip calls or Sample auto-polling." },
                         { Name = "CreateCodeBlock", Params = "Title, Content, CopyCallback, Height", Returns = ":Set, :Get", Description = "Monospace copyable content." },
                         { Name = "CreateTable", Params = "Title, Columns, Rows, OnRowActivated, Height", Returns = ":SetRows, :GetRows", Description = "Compact data grid." },
                         { Name = "CreateTextArea", Params = "Title, Text, Placeholder, Callback, Flag", Returns = ":Set, :Get, :Reset", Description = "Multi-line input." },
@@ -224,7 +225,7 @@ function Library:GetDocs()
                         { Name = "OpenCommandPalette", Params = "", Returns = "overlay" },
                 },
                 Library = {
-                        { Name = "CreateWindow", Params = "Name, Theme, Size, Host, Parent, Accessibility, Icon, KeySystem, KeySettings, ConfigurationSaving", Returns = "Window" },
+                        { Name = "CreateWindow", Params = "Name/Title, Theme (incl. Lava/Cyberpunk/Obsidian/Emerald), CustomTheme, Size, Host, Parent, Accessibility, Icon, KeySystem, KeySettings, ConfigurationSaving, Sounds, BackdropBlur, Density, DisplayOrder, ShadowImage, Activity, QuickPause", Returns = "Window" },
                         { Name = "RegisterTheme", Params = "name, palette", Returns = "palette" },
                         { Name = "RegisterImage", Params = "key, imageId", Returns = "string" },
                         { Name = "SaveConfiguration", Params = "", Returns = "table" },

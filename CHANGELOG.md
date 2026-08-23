@@ -1,5 +1,91 @@
 # Changelog
 
+## v5.2.0 "Universal" — Gemini Audit Fixes + Theme Engine + Telemetry
+
+The external design audit, implemented: the critical active-tab bug, the
+flat-contrast fixes, the minimized-bar upgrades, and the universal-library
+architecture (presets, CustomTheme, StatGrid). 233/233 tests.
+
+### 1. Critical active-tab bug — fixed
+- **Root cause**: the tab chip carried a white-identity UIGradient. Any theme
+  path that re-applied dark gradient colors multiplied the chip fill to a
+  BLACK box while the stroke stayed orange — the exact reported symptom.
+- The gradient is **deleted entirely**; the solid accent fill now renders
+  exactly on every theme.
+- The active label tweens to **explicit pure white** (Color3.new(1,1,1)) —
+  a broken custom `white` token can no longer blank the text.
+- Tab text/icons carry **ZIndex 7** with a guarantee comment; nothing can
+  render above them.
+
+### 2. Visual depth & surface layering
+- **Active toggle card glow** (spec): while ON, the card's border stroke
+  elevates from flat gray to a soft neon accent glow — accent color at
+  0.4 stroke transparency, 1.5px — and stays there (ambient "powered"
+  state, not a one-shot).
+- **Top edge accent line**: a 2px gradient strip (accent → secondary, e.g.
+  orange → gold) across the window's very top border. Separates the window
+  against bright game backgrounds and seals the minimized pill.
+
+### 3. Minimized bar upgrades
+- **Live activity beacon**: `Window:SetActivity("running"|"paused"|nil)`
+  (or `cfg.Activity`) — a breathing green dot beside the logo while
+  scripts run, yellow when paused, hidden when nil. Users see background
+  activity at a glance while minimized.
+- **Quick pause/resume button**: `cfg.QuickPause = function(paused) end`
+  (or `Window:SetQuickPause(fn)`) renders a tiny ❚❚/▶ control beside the
+  FPS/ping chip — freeze features WITHOUT expanding the window. The
+  library renders state and calls the callback; it never guesses what
+  "pause" means for your script.
+- Edge trim: the top accent line + existing frame stroke seal the
+  minimized pill (the v4.4 decoration-hiding already removed the floating
+  orange border).
+
+### 4. Universal theme engine
+- **Preset matrix** (exact spec colors): `Lava` (#FF4500/#FFAA00 on
+  #0B0D14), `Cyberpunk` (#00F0FF/#A100FF on #0D0E15), `Obsidian`
+  (#3A4454/#A0ABBA on #08090C), `Emerald` (#00FF88/#00B359 on #0A120E).
+  Each derives a full contrast ladder (accentHi/accentDim/accentDark,
+  panel family, header, borders) from the primary via color math — the
+  ladder can never be inconsistent.
+- **New `secondary` theme token** (powers the top-edge gradient and is
+  available to all elements).
+- **`CustomTheme` config**: friendly names (`PrimaryAccent`,
+  `SecondaryAccent`, `CardBackground`, `WindowBackground`, `TextMain`)
+  mapped onto tokens with auto-derived ladders, PLUS raw token passthrough
+  for power users. Combines with any preset.
+- **`Title`/`SubTitle` aliases** for Name/Subtitle — scripts written
+  against other libraries drop in unchanged.
+
+### 5. Telemetry & navigation
+- **`Tab:AddStatGrid({ Columns, UpdateRate })`**: the universal metric
+  grid — auto-wrapping chips (Icon/Label/Value) on dark translucent cards
+  with neon accent values. `:AddChip({Id, Icon, Label, Value, Sample})`,
+  `:UpdateChip(id, v)`, `:RemoveChip(id)`, auto-polling `Sample`
+  functions at `UpdateRate`. Replaces game-specific text logs with
+  live stat cards.
+- **Tab overflow fade masks**: tabs now fade out smoothly at the rail's
+  right edge (and the left edge once scrolled) instead of cutting off
+  hard against the frame.
+- Section headers already carry the accent tick + fading rule (v4.3);
+  auto-scrolling canvases, the Ctrl+K command palette, and contextual
+  icons (asset IDs or emoji) were already in place — verified, not
+  re-built.
+
+### 6. Engineering notes
+- Sound forward-declaration fixed a real closure-scope bug in the new
+  header controls (quick pause would have called a nil global).
+- Mock harness: Color3 value equality (`__eq`), `Color3.fromHex`,
+  deep-copying `Clone()` (matches real Roblox), CanvasGroup support.
+
+### Verified
+- 37 new checks: gradient-free chips + explicit white + ZIndex, all four
+  presets' exact colors, CustomTheme end-to-end, toggle glow resting
+  state (accent @ 0.4/1.5px), beacon modes, quick-pause callback
+  round-trip, fade masks + scroll visibility, StatGrid add/update/sample/
+  remove/row-growth. **233/233 passing.**
+
+---
+
 ## v5.1.0 "Kinetic" — The Micro-Interaction Blueprint, Implemented
 
 The full component-upgrade blueprint, built: every table row, the motion

@@ -260,7 +260,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.1.0"
+Library.Version = "5.2.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 

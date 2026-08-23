@@ -210,8 +210,66 @@ Themes.Soft.muted = Color3.fromRGB(168, 184, 174)
 Themes.Soft.border = Color3.fromRGB(61, 72, 65)
 Themes.Soft.track = Color3.fromRGB(56, 66, 60)
 
+-- [v5.2.0] Color math helpers for deriving a full token family from one
+-- primary (guarantees the accentHi/accentDim/accentDark contrast ladder).
+local function lightenColor(c, t)
+        return Color3.new(c.R + (1 - c.R) * t, c.G + (1 - c.G) * t, c.B + (1 - c.B) * t)
+end
+local function darkenColor(c, t)
+        return Color3.new(c.R * (1 - t), c.G * (1 - t), c.B * (1 - t))
+end
+-- Build a complete RezurX palette from Primary/Secondary/Surface trio.
+local function buildPreset(name, primary, secondary, surface, bestFor)
+        local p = {
+                bg        = surface,
+                panel     = lightenColor(surface, 0.05),
+                panelAlt  = lightenColor(surface, 0.10),
+                panelHov  = lightenColor(surface, 0.16),
+                accent    = primary,
+                accentHi  = lightenColor(primary, 0.28),
+                accentDim = darkenColor(primary, 0.30),
+                accentDark= darkenColor(primary, 0.62),
+                secondary = secondary,
+                text      = Color3.fromRGB(240, 243, 248),
+                textDim   = Color3.fromRGB(190, 196, 207),
+                muted     = Color3.fromRGB(140, 147, 158),
+                green     = Color3.fromRGB(0, 255, 136),
+                greenDim  = Color3.fromRGB(0, 90, 48),
+                yellow    = Color3.fromRGB(255, 187, 0),
+                red       = Color3.fromRGB(255, 61, 61),
+                border    = lightenColor(surface, 0.18),
+                track     = lightenColor(surface, 0.12),
+                white     = Color3.fromRGB(255, 255, 255),
+                black     = Color3.fromRGB(0, 0, 0),
+                tabBarBg  = darkenColor(surface, 0.35),
+                tabChip   = lightenColor(surface, 0.08),
+                tabChipHov= lightenColor(surface, 0.15),
+                headerA   = lightenColor(surface, 0.06),
+                headerB   = darkenColor(surface, 0.25),
+                indGradA  = darkenColor(primary, 0.15),
+                indGradB  = darkenColor(primary, 0.45),
+        }
+        if bestFor then p._bestFor = bestFor end
+        return p
+end
+
+-- [v5.2.0] Universal preset matrix (Gemini spec table).
+Themes.Lava = buildPreset("Lava",
+        Color3.fromHex("FF4500"), Color3.fromHex("FFAA00"), Color3.fromHex("0B0D14"),
+        "Simulators, high-intensity hubs")
+Themes.Cyberpunk = buildPreset("Cyberpunk",
+        Color3.fromHex("00F0FF"), Color3.fromHex("A100FF"), Color3.fromHex("0D0E15"),
+        "Exploits, combat, admin tools")
+Themes.Obsidian = buildPreset("Obsidian",
+        Color3.fromHex("3A4454"), Color3.fromHex("A0ABBA"), Color3.fromHex("08090C"),
+        "Minimalist & stealth scripts")
+Themes.Emerald = buildPreset("Emerald",
+        Color3.fromHex("00FF88"), Color3.fromHex("00B359"), Color3.fromHex("0A120E"),
+        "Utility, ESP, engine trackers")
+
 local ThemeTokenSet = {}
 for token in pairs(Themes.Quiet) do ThemeTokenSet[token] = true end
+ThemeTokenSet.secondary = true -- [v5.2.0]
 
 -- Active palette. Mutated in place by ApplyTheme so every
 -- closure that captured `C` keeps reading fresh values.

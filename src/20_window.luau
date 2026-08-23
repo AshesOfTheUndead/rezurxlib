@@ -1,8 +1,10 @@
 -- ============================================================
 function Library:CreateWindow(cfg)
         cfg = cfg or {}
-        local windowName   = cfg.Name or "RezurX UI"
-        local subtitle     = cfg.Subtitle or "Control center"
+        -- [v5.2.0] Universal aliases: Title/SubTitle map onto Name/Subtitle so
+        -- scripts written against other libraries drop in unchanged.
+        local windowName   = cfg.Name or cfg.Title or "RezurX UI"
+        local subtitle     = cfg.Subtitle or cfg.SubTitle or "Control center"
         local loadingTitle = cfg.LoadingTitle or windowName
         local loadingOn    = cfg.LoadingEnabled ~= false
         local toggleKey    = cfg.ToggleUIKeybind or Enum.KeyCode.K
@@ -62,6 +64,56 @@ function Library:CreateWindow(cfg)
         end
         if initialTheme then
                 for key, value in pairs(initialTheme) do
+                        if ThemeTokenSet[key] and typeof(value) == "Color3" then C[key] = value end
+                end
+        end
+        -- [v5.2.0] CUSTOM THEME OVERRIDES — friendly names mapped onto the
+        -- token system, applied AFTER the preset so both can combine:
+        --   CustomTheme = { PrimaryAccent = …, SecondaryAccent = …,
+        --                   CardBackground = …, WindowBackground = …, TextMain = … }
+        -- Raw token names (accent, panel, bg, …) are also accepted directly.
+        if type(cfg.CustomTheme) == "table" then
+                local ct = cfg.CustomTheme
+                local function setTok(tok, v)
+                        if typeof(v) == "Color3" then C[tok] = v end
+                end
+                if typeof(ct.PrimaryAccent) == "Color3" then
+                        local prim = ct.PrimaryAccent
+                        setTok("accent", prim)
+                        if typeof(ct.SecondaryAccent) == "Color3" then setTok("secondary", ct.SecondaryAccent) end
+                        -- Derive the contrast ladder unless explicitly provided.
+                        if not (typeof(ct.accentHi) == "Color3" or typeof(ct.BrightAccent) == "Color3") then
+                                C.accentHi = lightenColor(prim, 0.28)
+                        end
+                        if not (typeof(ct.accentDim) == "Color3" or typeof(ct.DimAccent) == "Color3") then
+                                C.accentDim = darkenColor(prim, 0.30)
+                        end
+                        if typeof(ct.accentDark) ~= "Color3" then
+                                C.accentDark = darkenColor(prim, 0.62)
+                        end
+                end
+                setTok("secondary", ct.SecondaryAccent)
+                if typeof(ct.CardBackground) == "Color3" then
+                        local card = ct.CardBackground
+                        setTok("panel", card)
+                        if typeof(ct.panelAlt) ~= "Color3" then C.panelAlt = lightenColor(card, 0.06) end
+                        if typeof(ct.panelHov) ~= "Color3" then C.panelHov = lightenColor(card, 0.13) end
+                end
+                if typeof(ct.WindowBackground) == "Color3" then
+                        local base = ct.WindowBackground
+                        setTok("bg", base)
+                        if typeof(ct.headerA) ~= "Color3" then C.headerA = lightenColor(base, 0.06) end
+                        if typeof(ct.headerB) ~= "Color3" then C.headerB = darkenColor(base, 0.25) end
+                        if typeof(ct.tabBarBg) ~= "Color3" then C.tabBarBg = darkenColor(base, 0.35) end
+                end
+                if typeof(ct.TextMain) == "Color3" then
+                        local txt = ct.TextMain
+                        setTok("text", txt)
+                        if typeof(ct.textDim) ~= "Color3" then C.textDim = darkenColor(txt, 0.22) end
+                        if typeof(ct.muted) ~= "Color3" then C.muted = darkenColor(txt, 0.42) end
+                end
+                -- Power users: raw token passthrough.
+                for key, value in pairs(ct) do
                         if ThemeTokenSet[key] and typeof(value) == "Color3" then C[key] = value end
                 end
         end
@@ -527,6 +579,34 @@ function Library:CreateWindow(cfg)
         corner(frame, R.outer)
         local frameStroke = stroke(frame, C.borderAcc, 1.5)
         frameStroke.Transparency = 0.55
+
+        -- [v5.2.0] TOP EDGE ACCENT LINE: a 2px gradient strip across the very
+        -- top border (accent -> secondary, e.g. orange->gold) that separates
+        -- the window cleanly against bright game backgrounds. Stays visible
+        -- when minimized — it seals the pill.
+        local topEdge = Instance.new("Frame")
+        topEdge.Name = "TopEdgeAccent"
+        topEdge.Size = UDim2.new(1, 0, 0, 2)
+        topEdge.Position = UDim2.new(0, 0, 0, 0)
+        topEdge.BackgroundColor3 = C.accent
+        topEdge.BorderSizePixel = 0
+        topEdge.ZIndex = 8
+        topEdge.Parent = frame
+        local topEdgeGrad = Instance.new("UIGradient")
+        topEdgeGrad.Rotation = 0
+        topEdgeGrad.Color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, C.accent),
+                ColorSequenceKeypoint.new(1.0, C.secondary),
+        }
+        topEdgeGrad.Parent = topEdge
+        onTheme(function()
+                Tween(topEdge, T20, { BackgroundColor3 = C.accent })
+                topEdgeGrad.Color = ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.accent),
+                        ColorSequenceKeypoint.new(1.0, C.secondary),
+                }
+        end)
+
         local traceRunning = false -- forward-declared (onTheme below reads it)
         -- Round joins prevent sharp pixels where the outer radius meets the
         -- footer on renderers that expose the optional LineJoinMode property.
@@ -771,6 +851,13 @@ function Library:CreateWindow(cfg)
         })
         -- A compact brand mark gives the header a focal point without
         -- turning the shell into a decorative dashboard.
+        -- [v5.2.0] Sound forward-declarations: header-level controls (quick
+        -- pause) reference these before the sound system initializes below.
+        local playSfx = function() end
+        local playSfxDual = function() end
+        local humSound = nil
+        local stopHum = function() end
+
         local brandMark = Instance.new("Frame")
         brandMark.Name = "BrandMark"
         brandMark.Size = UDim2.fromOffset(28, 28)
@@ -828,6 +915,47 @@ function Library:CreateWindow(cfg)
                 -- The floating restore button mirrors the icon later, once
                 -- floatIcon exists (see the restore-button section).
         end
+        -- [v5.2.0] LIVE ACTIVITY BEACON: a breathing dot beside the logo so
+        -- users can see background scripts are running while minimized.
+        -- green = running, yellow = paused. Window:SetActivity(mode).
+        local activityDot = nil
+        local activityToken = 0
+        local activityMode = nil
+        local function setActivity(mode)
+                activityMode = mode
+                activityToken = activityToken + 1
+                local myToken = activityToken
+                if activityDot and activityDot.Parent then activityDot:Destroy() end
+                activityDot = nil
+                if mode == nil then return end
+                activityDot = Instance.new("Frame")
+                activityDot.Name = "ActivityBeacon"
+                activityDot.Size = UDim2.fromOffset(7, 7)
+                activityDot.AnchorPoint = Vector2.new(0, 0.5)
+                activityDot.Position = UDim2.new(0, 50, 0.5, 0)
+                activityDot.BackgroundColor3 = (mode == "paused") and C.yellow or C.green
+                activityDot.BorderSizePixel = 0
+                activityDot.ZIndex = 6
+                activityDot.Parent = header
+                corner(activityDot, UDim.new(1, 0))
+                if mode == "running" and not reducedMotion then
+                        task.spawn(function()
+                                while activityToken == myToken and activityDot and activityDot.Parent do
+                                        Tween(activityDot, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                { BackgroundTransparency = 0.45, Size = UDim2.fromOffset(9, 9),
+                                                        Position = UDim2.new(0, 49, 0.5, 0) })
+                                        task.wait(0.8)
+                                        if not (activityToken == myToken and activityDot and activityDot.Parent) then break end
+                                        Tween(activityDot, TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+                                                { BackgroundTransparency = 0, Size = UDim2.fromOffset(7, 7),
+                                                        Position = UDim2.new(0, 50, 0.5, 0) })
+                                        task.wait(0.8)
+                                end
+                        end)
+                end
+        end
+        setActivity(type(cfg.Activity) == "string" and cfg.Activity or nil)
+
         local function applyBrandText(nextText)
                 brandText = limitBadgeText(nextText, "R")
                 brandLetter.Text = brandText
@@ -866,7 +994,9 @@ function Library:CreateWindow(cfg)
         -- is visible by default. Projects can still opt out explicitly with
         -- ShowStats = false.
         local showStats = cfg.ShowStats ~= false
-        local headerTextInset = showStats and 270 or 162
+        -- [v5.2.0] The quick-pause control reserves a lane when configured.
+        local quickPauseCfg = type(cfg.QuickPause) == "function" and cfg.QuickPause or nil
+        local headerTextInset = showStats and (quickPauseCfg and 312 or 270) or (quickPauseCfg and 204 or 162)
 
         local logo = Instance.new("TextLabel")
         logo.Text = windowName
@@ -905,9 +1035,70 @@ function Library:CreateWindow(cfg)
         end)
 
         -- FPS / PING chip
+        -- [v5.2.0] QUICK MACRO BUTTON: a tiny pause/resume control beside the
+        -- FPS/ping chip so users can freeze features WITHOUT expanding the
+        -- window. cfg.QuickPause = function(paused) ... end (or
+        -- Window:SetQuickPause(fn)). The library only renders state + calls
+        -- the callback — it never guesses what "pause" means for your script.
+        if quickPauseCfg then
+                local qpPaused = false
+                local qpBtn = Instance.new("TextButton")
+                qpBtn.Name = "QuickPause"
+                qpBtn.Size = UDim2.new(0, 30, 0, 26)
+                qpBtn.Position = UDim2.new(1, -222, 0.5, -13)
+                qpBtn.BackgroundColor3 = C.panelAlt
+                qpBtn.Text = ""
+                qpBtn.AutoButtonColor = false
+                qpBtn.BorderSizePixel = 0
+                qpBtn.Selectable = true
+                qpBtn.ZIndex = 5
+                qpBtn.Parent = header
+                corner(qpBtn, R.small)
+                local qpStroke = stroke(qpBtn, C.border, 1)
+                local qpLbl = Instance.new("TextLabel")
+                qpLbl.Size = UDim2.fromScale(1, 1)
+                qpLbl.BackgroundTransparency = 1
+                qpLbl.Font = Enum.Font.GothamBold
+                qpLbl.TextSize = 13
+                qpLbl.TextColor3 = C.green
+                qpLbl.Text = "❚❚"
+                qpLbl.ZIndex = 6
+                qpLbl.Parent = qpBtn
+                local function qpRender()
+                        qpLbl.Text = qpPaused and "▶" or "❚❚"
+                        qpLbl.TextColor3 = qpPaused and C.yellow or C.green
+                        Tween(qpStroke, T10, { Color = qpPaused and C.yellow or C.border })
+                end
+                qpBtn.MouseEnter:Connect(function()
+                        Tween(qpBtn, T10, { BackgroundColor3 = C.panelHov })
+                end)
+                qpBtn.MouseLeave:Connect(function()
+                        Tween(qpBtn, T10, { BackgroundColor3 = C.panelAlt })
+                end)
+                qpBtn.Activated:Connect(function()
+                        qpPaused = not qpPaused
+                        qpRender()
+                        playSfx(qpPaused and "ToggleOff" or "ToggleOn")
+                        task.spawn(function()
+                                local ok, err = pcall(quickPauseCfg, qpPaused)
+                                if not ok then warn("[RezurXLib] QuickPause callback error: " .. tostring(err)) end
+                        end)
+                end)
+                onTheme(function()
+                        Tween(qpBtn, T20, { BackgroundColor3 = C.panelAlt })
+                        qpRender()
+                end)
+                --- Attach/replace the quick-pause behavior at runtime.
+                function Window:SetQuickPause(fn)
+                        if type(fn) == "function" then quickPauseCfg = fn end
+                        return quickPauseCfg
+                end
+                Window._quickPauseState = function() return qpPaused end
+        end
+
         local statFrame = Instance.new("Frame")
         statFrame.Size = UDim2.new(0, 118, 0, 26)
-        statFrame.Position = UDim2.new(1, -224, 0.5, -13)
+        statFrame.Position = UDim2.new(1, quickPauseCfg and -262 or -224, 0.5, -13)
         statFrame.BackgroundColor3 = C.panelAlt
         statFrame.BorderSizePixel = 0
         statFrame.ZIndex = 5
@@ -1338,6 +1529,45 @@ function Library:CreateWindow(cfg)
 
         -- The rail owns layout. Keeping the sliding indicator outside it means
         -- tabs never overlap or get pushed by the indicator itself.
+        -- [v5.2.0] TAB OVERFLOW FADE MASKS: tabs that run past the rail's edge
+        -- fade out smoothly instead of cutting off hard against the frame.
+        -- The masks are non-interactive gradient overlays tinted to the tab
+        -- bar background; the LEFT mask only shows once the rail is scrolled.
+        local tabFadeRight = Instance.new("Frame")
+        tabFadeRight.Name = "TabFadeRight"
+        tabFadeRight.Size = UDim2.new(0, 26, 1, 0)
+        tabFadeRight.Position = UDim2.new(1, -26, 0, 0)
+        tabFadeRight.BackgroundColor3 = C.tabBarBg
+        tabFadeRight.BorderSizePixel = 0
+        tabFadeRight.ZIndex = 7 -- above chips (4) + text (7 via sibling ordering)
+        tabFadeRight.Parent = tabBar
+        local tabFadeRightGrad = Instance.new("UIGradient")
+        tabFadeRightGrad.Rotation = 0
+        tabFadeRightGrad.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0.0, 1.0),
+                NumberSequenceKeypoint.new(1.0, 0.0),
+        })
+        tabFadeRightGrad.Parent = tabFadeRight
+        local tabFadeLeft = tabFadeRight:Clone()
+        tabFadeLeft.Name = "TabFadeLeft"
+        tabFadeLeft.Position = UDim2.new(0, 0, 0, 0)
+        tabFadeLeft.BackgroundColor3 = C.tabBarBg
+        tabFadeLeft.ZIndex = 7
+        tabFadeLeft.Parent = tabBar
+        local tabFadeLeftGrad = tabFadeLeft:FindFirstChildOfClass("UIGradient")
+        tabFadeLeftGrad.Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0.0, 0.0),
+                NumberSequenceKeypoint.new(1.0, 1.0),
+        })
+        tabFadeLeft.Visible = false
+        tabBar:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+                tabFadeLeft.Visible = tabBar.CanvasPosition.X > 2
+        end)
+        onTheme(function()
+                Tween(tabFadeRight, T20, { BackgroundColor3 = C.tabBarBg })
+                Tween(tabFadeLeft, T20, { BackgroundColor3 = C.tabBarBg })
+        end)
+
         local tabRail = Instance.new("Frame")
         tabRail.Name = "TabRail"
         tabRail.Size = UDim2.new(0, 0, 1, 0)
@@ -1729,10 +1959,6 @@ function Library:CreateWindow(cfg)
         --   sliderStep 1.3/0.15  toast 1.0/0.40 (dual-tone)  confirm 1.3/0.30
         --   hum 0.55/0.12 (looped while a keybind listens for input)
         -- ------------------------------------------------------------
-        local playSfx = function() end
-        local playSfxDual = function() end
-        local humSound = nil
-        local stopHum = function() end
         do
                 local scfg = cfg.Sounds == true and {} or cfg.Sounds
                 if type(scfg) == "table" then
@@ -2380,14 +2606,12 @@ function Library:CreateWindow(cfg)
                 btn.Parent = tabRail
                 corner(btn, R.tab)
                 local chipStroke = stroke(btn, C.borderAcc, 1)
-                -- [v4.3.0] ACTIVE TAB = SOLID ACCENT FILL. The gradient stays a
-                -- white identity (no tint) so the chip renders EXACTLY its
-                -- BackgroundColor3 — UIGradient.Color multiplies with the bg
-                -- color, so encoding the fill in the gradient would double-darken.
-                local chipGrad = gradient(btn, ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.white),
-                        ColorSequenceKeypoint.new(1.0, C.white),
-                }, 90)
+                -- [v5.2.0 CRITICAL FIX] The old white-identity UIGradient on the
+                -- chip multiplied with BackgroundColor3 — any theme/path that
+                -- re-applied dark gradient colors rendered the active chip as a
+                -- BLACK box with an orange outline (the reported bug). The chip
+                -- now has NO gradient at all: the solid accent fill renders
+                -- exactly, on every theme, every time.
                 -- Render tab text in a dedicated label. This is deliberately
                 -- separate from the button hit target so labels remain visible
                 -- on every client renderer and never compete with input.
@@ -2396,6 +2620,10 @@ function Library:CreateWindow(cfg)
                 textLbl.Size = UDim2.new(1, -16, 1, 0)
                 textLbl.Position = UDim2.fromOffset(8, 0)
                 textLbl.BackgroundTransparency = 1
+                -- [v5.2.0] ZIndex GUARANTEE: text and icons always render above
+                -- the chip fill and any indicator — the active highlight can
+                -- never cover them (the blank-active-tab bug).
+                textLbl.ZIndex = 7
                 textLbl.Active = false
                 textLbl.Font = Enum.Font.GothamMedium
                 textLbl.TextSize = 12
@@ -2405,7 +2633,6 @@ function Library:CreateWindow(cfg)
                 textLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
                 textLbl.TextTruncate = Enum.TextTruncate.AtEnd
                 textLbl.Text = btnText
-                textLbl.ZIndex = 5
                 textLbl.Parent = btn
                 -- [v4.0] Asset tab icon: an 18px image sits left of the title
                 -- (Rayfield-style), and the title label shifts right to fit.
@@ -2417,7 +2644,7 @@ function Library:CreateWindow(cfg)
                         tabIconImg.Position = UDim2.new(0, 9, 0.5, -9)
                         tabIconImg.BackgroundTransparency = 1
                         tabIconImg.Image = tabIconUri
-                        tabIconImg.ZIndex = 5
+                        tabIconImg.ZIndex = 7 -- [v5.2.0] above the chip fill, always
                         tabIconImg.Parent = btn
                         textLbl.Position = UDim2.fromOffset(30, 0)
                         textLbl.Size = UDim2.new(1, -38, 1, 0)
@@ -2541,7 +2768,10 @@ function Library:CreateWindow(cfg)
                         -- exactly as requested. Inactive tabs stay quiet chips.
                         Tween(btn, T20, { BackgroundColor3 = C.accent })
                         Tween(chipStroke, T20, { Color = C.accentHi, Transparency = 0.15 })
-                        Tween(textLbl, T20, { TextColor3 = C.white })
+                        -- [v5.2.0] EXPLICIT pure white — the active label must be
+                        -- readable on ANY accent fill, independent of the theme's
+                        -- `white` token (a bad custom theme can no longer blank it).
+                        Tween(textLbl, T20, { TextColor3 = Color3.new(1, 1, 1) })
                         textLbl.Font = Enum.Font.GothamBold
                         moveIndicatorTo(btn, not skipAnim)
                         -- [v5.0.0] TRACE: quarter lap toward the new tab — the
@@ -2594,7 +2824,6 @@ function Library:CreateWindow(cfg)
                 end
                 tab._chipStroke = chipStroke
                 tab._textLbl = textLbl
-                tab._chipGrad = chipGrad
                 tab._setActive = setActive
 
                 onTheme(function()
@@ -2602,7 +2831,7 @@ function Library:CreateWindow(cfg)
                         if ActiveTab == tab then
                                 Tween(btn, T20, { BackgroundColor3 = C.accent })
                                 Tween(chipStroke, T20, { Color = C.accentHi, Transparency = 0.15 })
-                                Tween(textLbl, T20, { TextColor3 = C.white })
+                                Tween(textLbl, T20, { TextColor3 = Color3.new(1, 1, 1) })
                         else
                                 Tween(btn, T20, { BackgroundColor3 = C.tabChip })
                                 Tween(chipStroke, T20, { Color = C.borderAcc, Transparency = 0 })
@@ -3373,13 +3602,19 @@ function Library:CreateWindow(cfg)
                                 -- to the resting accent. One-shot feedback (the
                                 -- press moment), not an idle loop.
                                 if state then
+                                        -- [v5.2.0] ACTIVE-STATE CARD GLOW (spec): the whole
+                                        -- card's border elevates from flat gray to a soft neon
+                                        -- accent glow — accent color at 0.4 stroke transparency
+                                        -- — and STAYS there while ON (ambient state, not a
+                                        -- one-shot): the card visibly reads as "powered".
                                         if bloomTween then pcall(function() bloomTween:Cancel() end) end
                                         hStroke.Thickness = 2.2
                                         hStroke.Color = C.accentHi
+                                        hStroke.Transparency = 0
                                         bloomTween = Tween(hStroke, MT.settle,
-                                                { Thickness = 1, Color = C.accentDim })
+                                                { Thickness = 1.5, Color = C.accent, Transparency = 0.4 })
                                 else
-                                        Tween(hStroke, MT.move, { Color = C.border, Thickness = 1 })
+                                        Tween(hStroke, MT.move, { Color = C.border, Thickness = 1, Transparency = 0 })
                                 end
                                 -- Knob slides with smooth easing
                                 Tween(knob, TTOGGLE, {
@@ -5307,6 +5542,171 @@ function Library:CreateWindow(cfg)
                 end
 
                 -- ========================================================
+                -- [v5.2.0] AddStatGrid({ Columns, UpdateRate, Height })
+                -- Universal telemetry grid: live metric chips in an auto-
+                -- wrapping grid. Game-agnostic — the developer mounts whatever
+                -- trackers they need:
+                --   local g = Tab:AddStatGrid({ Columns = 3, UpdateRate = 0.5 })
+                --   g:AddChip({ Id = "fps", Icon = "⚡", Label = "FPS", Value = "60" })
+                --   g:UpdateChip("fps", "59")
+                -- Chips may carry Sample = function() return "…" end for
+                -- automatic polling at UpdateRate.
+                -- ========================================================
+                function tab:AddStatGrid(gcfg)
+                        gcfg = gcfg or {}
+                        local columns = math.clamp(math.floor(tonumber(gcfg.Columns) or 3), 1, 6)
+                        local updateRate = math.clamp(tonumber(gcfg.UpdateRate) or 0.5, 0.1, 30)
+                        local chipH = gcfg.ChipHeight or 52
+
+                        local holder = Instance.new("Frame")
+                        holder.Name = "StatGrid"
+                        holder.Size = UDim2.new(1, 0, 0, chipH)
+                        holder.BackgroundTransparency = 1
+                        holder.Parent = page
+
+                        local grid = Instance.new("UIGridLayout")
+                        grid.CellSize = UDim2.new(1 / columns, -6, 0, chipH)
+                        grid.CellPadding = UDim2.new(0, 6, 0, 6)
+                        grid.SortOrder = Enum.SortOrder.LayoutOrder
+                        grid.FillDirectionMaxCells = columns
+                        grid.Parent = holder
+
+                        local chips = {}      -- id -> { obj, sample }
+                        local chipCount = 0
+                        local orderCounter = 0
+
+                        local function relayout()
+                                local rows = math.max(1, math.ceil(chipCount / columns))
+                                holder.Size = UDim2.new(1, 0, 0, rows * chipH + (rows - 1) * 6)
+                        end
+
+                        local gridObj = {}
+                        function gridObj:AddChip(ccfg)
+                                ccfg = ccfg or {}
+                                local id = tostring(ccfg.Id or ccfg.Label or ("chip" .. (orderCounter + 1)))
+                                if chips[id] then return chips[id].obj end
+                                orderCounter = orderCounter + 1
+                                chipCount = chipCount + 1
+
+                                local card = Instance.new("Frame")
+                                card.Name = "StatChip_" .. id
+                                card.LayoutOrder = orderCounter
+                                card.BackgroundColor3 = C.panelAlt
+                                card.BackgroundTransparency = 0.25
+                                card.BorderSizePixel = 0
+                                card.Parent = holder
+                                corner(card, R.control)
+
+                                local topRow = Instance.new("Frame")
+                                topRow.Size = UDim2.new(1, -16, 0, 14)
+                                topRow.Position = UDim2.new(0, 8, 0, 7)
+                                topRow.BackgroundTransparency = 1
+                                topRow.Parent = card
+                                local iconLbl = Instance.new("TextLabel")
+                                iconLbl.Size = UDim2.new(0, 14, 1, 0)
+                                iconLbl.BackgroundTransparency = 1
+                                iconLbl.Font = Enum.Font.GothamMedium
+                                iconLbl.TextSize = 10
+                                iconLbl.TextColor3 = C.textDim
+                                iconLbl.TextXAlignment = Enum.TextXAlignment.Left
+                                iconLbl.Text = tostring(ccfg.Icon or "•")
+                                iconLbl.Parent = topRow
+                                local lbl = Instance.new("TextLabel")
+                                lbl.Size = UDim2.new(1, -18, 1, 0)
+                                lbl.Position = UDim2.new(0, 18, 0, 0)
+                                lbl.BackgroundTransparency = 1
+                                lbl.Font = Enum.Font.GothamBold
+                                lbl.TextSize = 8
+                                lbl.TextColor3 = C.muted
+                                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                                lbl.Text = string.upper(tostring(ccfg.Label or id))
+                                lbl.Parent = topRow
+
+                                local val = Instance.new("TextLabel")
+                                val.Size = UDim2.new(1, -16, 0, 18)
+                                val.Position = UDim2.new(0, 8, 1, -22)
+                                val.BackgroundTransparency = 1
+                                val.Font = Enum.Font.Code
+                                val.TextSize = 15
+                                val.TextColor3 = C.accentHi
+                                val.TextXAlignment = Enum.TextXAlignment.Left
+                                val.TextTruncate = Enum.TextTruncate.AtEnd
+                                val.Text = tostring(ccfg.Value or "—")
+                                val.Parent = card
+
+                                local chip = {
+                                        obj = {
+                                                Id = id,
+                                                SetValue = function(_, v)
+                                                        val.Text = tostring(v)
+                                                end,
+                                                SetLabel = function(_, v)
+                                                        lbl.Text = string.upper(tostring(v))
+                                                end,
+                                        },
+                                        card = card,
+                                        val = val,
+                                }
+                                chip.sample = type(ccfg.Sample) == "function" and ccfg.Sample or nil
+                                chips[id] = chip
+                                relayout()
+                                onTheme(function()
+                                        Tween(card, T20, { BackgroundColor3 = C.panelAlt })
+                                        Tween(val, T20, { TextColor3 = C.accentHi })
+                                        iconLbl.TextColor3 = C.textDim
+                                        lbl.TextColor3 = C.muted
+                                end)
+                                return chip.obj
+                        end
+
+                        --- Update a chip's displayed value by id.
+                        function gridObj:UpdateChip(id, value)
+                                local chip = chips[tostring(id)]
+                                if chip then chip.val.Text = tostring(value) end
+                        end
+
+                        --- Remove a chip by id.
+                        function gridObj:RemoveChip(id)
+                                id = tostring(id)
+                                local chip = chips[id]
+                                if chip then
+                                        chip.card:Destroy()
+                                        chips[id] = nil
+                                        chipCount = math.max(0, chipCount - 1)
+                                        relayout()
+                                end
+                        end
+
+                        function gridObj:GetChipCount()
+                                return chipCount
+                        end
+
+                        function gridObj:Destroy()
+                                holder:Destroy()
+                        end
+
+                        registerFlag(gcfg.Flag, gridObj)
+                        applyTooltip(holder, gcfg.Tooltip)
+
+                        -- Auto-poll any Sample functions at UpdateRate.
+                        if updateRate then
+                                task.spawn(function()
+                                        while holder.Parent do
+                                                task.wait(updateRate)
+                                                if not holder.Parent then break end
+                                                for _, chip in pairs(chips) do
+                                                        if type(chip.sample) == "function" then
+                                                                local ok, v = pcall(chip.sample)
+                                                                if ok and v ~= nil then chip.val.Text = tostring(v) end
+                                                        end
+                                                end
+                                        end
+                                end)
+                        end
+                        return gridObj
+                end
+
+                -- ========================================================
                 -- [v4.4.0] CreateGraph({ Name, Max, Bars, Height, Suffix,
                 --                        Sample, RefreshRate, Flag })
                 -- A live sparkline: feed it values with :Push(v) (or provide
@@ -6700,6 +7100,14 @@ function Library:CreateWindow(cfg)
                 toggleKey = nextKey
                 refreshKeyBadge()
                 return toggleKey
+        end
+
+        --- Set the activity beacon: "running" (green breathing), "paused"
+        --- (yellow static), or nil to hide. Shown while minimized so users
+        --- know background scripts are live.
+        function Window:SetActivity(mode)
+                setActivity(mode)
+                return mode
         end
 
         function Window:GetToggleKeybind()

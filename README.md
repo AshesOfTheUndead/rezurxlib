@@ -1,4 +1,4 @@
-# 👑 RezurXLib v5.1.0 "Kinetic"
+# 👑 RezurXLib v5.2.0 "Universal"
 
 **A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
 
@@ -13,6 +13,18 @@ RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides
 ---
 
 ## ✨ What's New in v4.0 "Aurora"
+
+### 🌍 Universal (v5.2.0)
+- **Critical fix**: the active tab can never render as a blank black box again (gradient hazard deleted, explicit white text, ZIndex guarantees)
+- **Preset themes**: `Lava` · `Cyberpunk` · `Obsidian` · `Emerald` — full contrast ladders derived automatically
+- **`CustomTheme`**: `{ PrimaryAccent = …, CardBackground = …, TextMain = … }` with auto-derived shades; raw tokens too
+- **Active toggle glow**: cards glow neon accent while ON (0.4 stroke transparency)
+- **Top edge accent line**: accent→secondary gradient seals the window (and the minimized pill)
+- **Activity beacon**: `SetActivity("running"/"paused")` — breathing dot beside the logo
+- **Quick pause**: `cfg.QuickPause = fn` — freeze features from the minimized bar
+- **`Tab:AddStatGrid`**: universal telemetry chips — `:AddChip`, `:UpdateChip`, auto-polling `Sample`
+- **Tab fade masks**: overflowing tabs fade at the rail edges
+- **`Title`/`SubTitle` aliases** for drop-in compatibility
 
 ### 🎮 Kinetic (v5.1.0) — the micro-interaction blueprint
 - **Buttons**: 0.96x spring press + 20° sheen sweep across the face + metallic tick
@@ -150,7 +162,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 
 **Snappy interactions** — 0.26s toggles, instant-feeling hover states, and a 4Hz-capped stats chip so the header never costs you frames
 
-**7 built-in themes** — Ember, Ocean, Crimson, Slate, Midnight, Forest, Coral, Quiet — plus `Library:RegisterTheme()` for your own.
+**11 built-in themes** — Ember, Ocean, Crimson, Slate, Midnight, Forest, Coral, Quiet + Lava, Cyberpunk, Obsidian, Emerald — Ember, Ocean, Crimson, Slate, Midnight, Forest, Coral, Quiet — plus `Library:RegisterTheme()` for your own.
 
 ---
 
@@ -159,7 +171,7 @@ Including two critical ones that explain the most common "ghost UI" reports:
 - **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
 - **Error-handled** — every callback wrapped in `pcall`
 - **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 195 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
+- **Headless-tested** — 233 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
 - **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
 - **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
 
@@ -221,6 +233,9 @@ _G.RezurXLib:CreateWindow({ Name = "Admin Panel" })
 | `BackdropBlur` | `boolean` | Blurs the whole game world (global), refcounted (v5) |
 | `ShadowImage` | `string` | Optional 9-slice shadow asset (v5) |
 | `Density` | `string` | `"compact"` / `"comfortable"` (v5) |
+| `CustomTheme` | `table` | `{ PrimaryAccent, SecondaryAccent, CardBackground, TextMain, … }` (v5.2) |
+| `Activity` | `string` | `"running"` / `"paused"` beacon (v5.2) |
+| `QuickPause` | `function` | Quick pause/resume callback (v5.2) |
 | `DisplayOrder` | `number` | ScreenGui DisplayOrder (v5) |
 
 **Returns:** `Window` object

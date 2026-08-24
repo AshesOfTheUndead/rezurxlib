@@ -255,7 +255,7 @@ end
 
 -- [v5.2.0] Universal preset matrix (Gemini spec table).
 Themes.Lava = buildPreset("Lava",
-        Color3.fromRGB(255, 69, 0), Color3.fromRGB(255, 170, 0), Color3.fromRGB(11, 13, 20),
+        Color3.fromRGB(255, 69, 0), Color3.fromRGB(255, 170, 0), Color3.fromRGB(20, 15, 13),
         "Simulators, high-intensity hubs")
 Themes.Cyberpunk = buildPreset("Cyberpunk",
         Color3.fromRGB(0, 240, 255), Color3.fromRGB(161, 0, 255), Color3.fromRGB(13, 14, 21),

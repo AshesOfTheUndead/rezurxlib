@@ -534,7 +534,7 @@ function Library:CreateWindow(cfg)
         -- and version text squeezed against the frame's bottom border (the
         -- R.outer=20 corner curve eats into the bar's vertical space). 30px
         -- gives the 14px text real breathing room.
-        local HEADER_H, TABBAR_H, STATUSBAR_H = 54, 40, 30
+        local HEADER_H, STATUSBAR_H = 54, 30
 
         -- ------------------------------------------------------------
         -- WINDOW SHADOW (v5.0.0) — ONE instance, never a stack.
@@ -1508,112 +1508,123 @@ function Library:CreateWindow(cfg)
         end))
 
         -- ------------------------------------------------------------
-        -- TAB BAR + SLIDING INDICATOR
+        -- [v5.5.0 MAGMA] SIDEBAR NAVIGATION RAIL — Rayfield Gen2 × Maclib
+        -- cross. Tabs live in a VERTICAL rail on the left (Maclib sidebar
+        -- discipline) with Rayfield-style pill chips and a sliding edge-bar
+        -- selector carrying the lava gradient. Narrow/sheet windows collapse
+        -- the rail to an icon strip so phones keep their content width.
         -- ------------------------------------------------------------
+        -- [v5.5.0] Forward-declared here: the sidebar's adaptive-mode helpers
+        -- and the chip-mode refresher close over Tabs/ActiveTab/
+        -- moveIndicatorTo, which gain their real values further below.
+        local Tabs = {}
+        local ActiveTab = nil
+        local moveIndicatorTo = function() end
+        local SIDEBAR_W = 156
+        local SIDEBAR_ICON_W = 54
+        local sidebarIconMode = false
         local tabBar = Instance.new("ScrollingFrame")
-        tabBar.Size = UDim2.new(1, 0, 0, TABBAR_H)
+        tabBar.Name = "TabRail"
+        tabBar.Size = UDim2.new(0, SIDEBAR_W, 1, -STATUSBAR_H)
+        tabBar.Position = UDim2.new(0, 0, 0, 0)
         tabBar.BackgroundColor3 = C.tabBarBg
         tabBar.BorderSizePixel = 0
         tabBar.ZIndex = 3
-        tabBar.ScrollingDirection = Enum.ScrollingDirection.X
-        tabBar.CanvasSize = UDim2.new(0, 0, 1, 0)
+        tabBar.ScrollingDirection = Enum.ScrollingDirection.Y
+        tabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
         tabBar.ScrollBarThickness = 3
         tabBar.ScrollBarImageColor3 = C.accent
         tabBar.ScrollBarImageTransparency = 0.5
-        tabBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+        tabBar.AutomaticCanvasSize = Enum.AutomaticSize.Y
         tabBar.ElasticBehavior = Enum.ElasticBehavior.Never
         tabBar.Parent = body
         local tabBarStroke = stroke(tabBar, C.border, 1)
 
-        -- The rail owns layout. Keeping the sliding indicator outside it means
-        -- tabs never overlap or get pushed by the indicator itself.
-        -- [v5.2.0] TAB OVERFLOW FADE MASKS: tabs that run past the rail's edge
-        -- fade out smoothly instead of cutting off hard against the frame.
-        -- The masks are non-interactive gradient overlays tinted to the tab
-        -- bar background; the LEFT mask only shows once the rail is scrolled.
-        local tabFadeRight = Instance.new("Frame")
-        tabFadeRight.Name = "TabFadeRight"
-        tabFadeRight.Size = UDim2.new(0, 26, 1, 0)
-        tabFadeRight.Position = UDim2.new(1, -26, 0, 0)
-        tabFadeRight.BackgroundColor3 = C.tabBarBg
-        tabFadeRight.BorderSizePixel = 0
-        tabFadeRight.ZIndex = 7 -- above chips (4) + text (7 via sibling ordering)
-        tabFadeRight.Parent = tabBar
-        local tabFadeRightGrad = Instance.new("UIGradient")
-        tabFadeRightGrad.Rotation = 0
-        tabFadeRightGrad.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0.0, 1.0),
-                NumberSequenceKeypoint.new(1.0, 0.0),
-        })
-        tabFadeRightGrad.Parent = tabFadeRight
-        local tabFadeLeft = tabFadeRight:Clone()
-        tabFadeLeft.Name = "TabFadeLeft"
-        tabFadeLeft.Position = UDim2.new(0, 0, 0, 0)
-        tabFadeLeft.BackgroundColor3 = C.tabBarBg
-        tabFadeLeft.ZIndex = 7
-        tabFadeLeft.Parent = tabBar
-        local tabFadeLeftGrad = tabFadeLeft:FindFirstChildOfClass("UIGradient")
-        tabFadeLeftGrad.Transparency = NumberSequence.new({
-                NumberSequenceKeypoint.new(0.0, 0.0),
-                NumberSequenceKeypoint.new(1.0, 1.0),
-        })
-        tabFadeLeft.Visible = false
-        tabBar:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-                tabFadeLeft.Visible = tabBar.CanvasPosition.X > 2
-        end)
-        onTheme(function()
-                Tween(tabFadeRight, T20, { BackgroundColor3 = C.tabBarBg })
-                Tween(tabFadeLeft, T20, { BackgroundColor3 = C.tabBarBg })
-        end)
+        -- [v5.5.0] VERTICAL FADE MASKS: tabs that run past the rail's top or
+        -- bottom edge fade out smoothly instead of cutting off hard. Tinted
+        -- to the rail background; the TOP mask only shows once scrolled.
+        -- (Scoped: the masks are referenced only here and inside onTheme —
+        -- freeing their registers for the rest of this very large function.)
+        do
+                local tabFadeRight = Instance.new("Frame")
+                tabFadeRight.Name = "TabFadeBottom"
+                tabFadeRight.Size = UDim2.new(1, 0, 0, 22)
+                tabFadeRight.Position = UDim2.new(0, 0, 1, -22)
+                tabFadeRight.BackgroundColor3 = C.tabBarBg
+                tabFadeRight.BorderSizePixel = 0
+                tabFadeRight.ZIndex = 7
+                tabFadeRight.Parent = tabBar
+                local tabFadeRightGrad = Instance.new("UIGradient")
+                tabFadeRightGrad.Rotation = 90
+                tabFadeRightGrad.Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0.0, 1.0),
+                        NumberSequenceKeypoint.new(1.0, 0.0),
+                })
+                tabFadeRightGrad.Parent = tabFadeRight
+                local tabFadeLeft = tabFadeRight:Clone()
+                tabFadeLeft.Name = "TabFadeTop"
+                tabFadeLeft.Position = UDim2.new(0, 0, 0, 0)
+                tabFadeLeft.BackgroundColor3 = C.tabBarBg
+                tabFadeLeft.ZIndex = 7
+                tabFadeLeft.Parent = tabBar
+                local tabFadeLeftGrad = tabFadeLeft:FindFirstChildOfClass("UIGradient")
+                tabFadeLeftGrad.Transparency = NumberSequence.new({
+                        NumberSequenceKeypoint.new(0.0, 0.0),
+                        NumberSequenceKeypoint.new(1.0, 1.0),
+                })
+                tabFadeLeft.Visible = false
+                tabBar:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+                        tabFadeLeft.Visible = tabBar.CanvasPosition.Y > 2
+                end)
+                onTheme(function()
+                        Tween(tabFadeRight, T20, { BackgroundColor3 = C.tabBarBg })
+                        Tween(tabFadeLeft, T20, { BackgroundColor3 = C.tabBarBg })
+                end)
+        end
 
         local tabRail = Instance.new("Frame")
-        tabRail.Name = "TabRail"
-        tabRail.Size = UDim2.new(0, 0, 1, 0)
-        tabRail.Position = UDim2.fromOffset(4, 0)
-        tabRail.AutomaticSize = Enum.AutomaticSize.X
+        tabRail.Name = "TabList"
+        tabRail.Size = UDim2.new(1, -14, 0, 0)
+        tabRail.Position = UDim2.fromOffset(7, 10)
+        tabRail.AutomaticSize = Enum.AutomaticSize.Y
         tabRail.BackgroundTransparency = 1
         tabRail.Parent = tabBar
         local tabLayout = Instance.new("UIListLayout")
-        tabLayout.FillDirection = Enum.FillDirection.Horizontal
-        tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-        tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-        tabLayout.Padding = UDim.new(0, 6)
+        tabLayout.FillDirection = Enum.FillDirection.Vertical
+        tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        tabLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+        tabLayout.Padding = UDim.new(0, 5)
         tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
         tabLayout.Parent = tabRail
 
-        -- [v4.4.0 REDESIGN] The indicator is now a 3px SLIDING UNDERLINE that
-        -- rides beneath the active tab chip (as requested) instead of a
-        -- full-size dark pill that sat misaligned and rendered as a stray
-        -- "black chip" at the rail's left edge. Chips sit at y=0..30 in the
-        -- 40px bar; the underline lives in the 6px strip below them.
-        -- [v5.1.0] GLIDING GLASS PILLAR (spec): the active-tab indicator is a
-        -- glowing glass bar — a 4px core with a soft 10px glow backing, both
-        -- moving as ONE instance pair on ONE spring (interruptible, momentum
-        -- preserving). The glow is the pillar's aura, not a second effect.
+        -- [v5.5.0 MAGMA] The selector is a VERTICAL EDGE BAR on the rail's
+        -- left edge — a 3px lava-gradient core with a soft 5px glow backing,
+        -- both moving as ONE instance pair on ONE spring (interruptible,
+        -- momentum preserving). Rayfield's pill indicator, rotated Maclib.
         local tabIndicator = Instance.new("Frame")
         tabIndicator.Name = "ActiveIndicatorGlow"
-        tabIndicator.Size = UDim2.new(0, 70, 0, 10)
-        tabIndicator.Position = UDim2.new(0, 4, 0, TABBAR_H - 8)
+        tabIndicator.Size = UDim2.new(0, 5, 0, 30)
+        tabIndicator.Position = UDim2.new(0, 2, 0, 10)
         tabIndicator.BackgroundColor3 = C.accent
-        tabIndicator.BackgroundTransparency = 0.88
+        tabIndicator.BackgroundTransparency = 0.86
         tabIndicator.BorderSizePixel = 0
         tabIndicator.ZIndex = 5
         tabIndicator.Parent = tabBar
         corner(tabIndicator, PILL)
         local tabIndCore = Instance.new("Frame")
         tabIndCore.Name = "ActiveIndicator"
-        tabIndCore.Size = UDim2.new(1, 0, 0, 4)
-        tabIndCore.Position = UDim2.new(0, 0, 0.5, -2)
+        tabIndCore.Size = UDim2.new(0, 3, 1, 0)
+        tabIndCore.Position = UDim2.new(0, 1, 0, 0)
         tabIndCore.BackgroundColor3 = C.accent
         tabIndCore.BorderSizePixel = 0
         tabIndCore.ZIndex = 6
         tabIndCore.Parent = tabIndicator
         corner(tabIndCore, PILL)
         local tabIndGrad = gradient(tabIndCore, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.accentDim),
+                ColorSequenceKeypoint.new(0.0, C.accent),
                 ColorSequenceKeypoint.new(0.5, C.accentHi),
-                ColorSequenceKeypoint.new(1.0, C.accentDim),
-        }, 0)
+                ColorSequenceKeypoint.new(1.0, C.secondary),
+        }, 90)
         onTheme(function()
                 Tween(tabBar, T20, { BackgroundColor3 = C.tabBarBg })
                 tabBar.ScrollBarImageColor3 = C.accent
@@ -1621,17 +1632,94 @@ function Library:CreateWindow(cfg)
                 Tween(tabIndicator, T20, { BackgroundColor3 = C.accent })
                 Tween(tabIndCore, T20, { BackgroundColor3 = C.accent })
                 tabIndGrad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.accentDim),
+                        ColorSequenceKeypoint.new(0.0, C.accent),
                         ColorSequenceKeypoint.new(0.5, C.accentHi),
-                        ColorSequenceKeypoint.new(1.0, C.accentDim),
+                        ColorSequenceKeypoint.new(1.0, C.secondary),
                 }
         end)
 
         local content = Instance.new("Frame")
-        content.Size = UDim2.new(1, 0, 1, -(TABBAR_H + STATUSBAR_H))
-        content.Position = UDim2.new(0, 0, 0, TABBAR_H)
+        content.Name = "Content"
+        content.Size = UDim2.new(1, -SIDEBAR_W, 1, -STATUSBAR_H)
+        content.Position = UDim2.new(0, SIDEBAR_W, 0, 0)
         content.BackgroundTransparency = 1
         content.Parent = body
+
+        -- [v5.5.0] Lava hairline between rail and content: a 1px vertical
+        -- divider carrying the accent at whisper transparency — Rayfield's
+        -- separator detail in the library's signature gradient.
+        local tabDivider = Instance.new("Frame")
+        tabDivider.Name = "SidebarDivider"
+        tabDivider.Size = UDim2.new(0, 1, 1, -STATUSBAR_H)
+        tabDivider.Position = UDim2.new(0, SIDEBAR_W, 0, 0)
+        tabDivider.BackgroundColor3 = C.accent
+        tabDivider.BackgroundTransparency = 0.82
+        tabDivider.BorderSizePixel = 0
+        tabDivider.ZIndex = 4
+        tabDivider.Parent = body
+        do
+                local tabDividerGrad = gradient(tabDivider, ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.accent),
+                        ColorSequenceKeypoint.new(0.45, C.secondary),
+                        ColorSequenceKeypoint.new(1.0, C.accent),
+                }, 90)
+                onTheme(function()
+                        Tween(tabDivider, T20, { BackgroundColor3 = C.accent })
+                        tabDividerGrad.Color = ColorSequence.new{
+                                ColorSequenceKeypoint.new(0.0, C.accent),
+                                ColorSequenceKeypoint.new(0.45, C.secondary),
+                                ColorSequenceKeypoint.new(1.0, C.accent),
+                        }
+                end)
+        end
+
+        -- [v5.5.0] Adaptive rail: sheet mode (phones) and narrow floating
+        -- windows collapse the sidebar to an icon strip so content keeps
+        -- its width. Chips restyle themselves (emoji-only labels, centered);
+        -- asset icons center; text-only chips shrink to quiet squares.
+        local function refreshTabChipModes()
+                for _, t in ipairs(Tabs) do
+                        local chip, lbl = t.Btn, t._textLbl
+                        local iconImg = t._tabIconImg
+                        if not chip or not chip.Parent or not lbl then continue end
+                        if sidebarIconMode then
+                                lbl.Text = t._iconText or ""
+                                lbl.TextXAlignment = Enum.TextXAlignment.Center
+                                lbl.Size = UDim2.new(1, 0, 1, 0)
+                                lbl.Position = UDim2.fromOffset(0, 0)
+                                if iconImg then
+                                        iconImg.Position = UDim2.new(0.5, -9, 0.5, -9)
+                                end
+                        else
+                                lbl.Text = t._fullLabel or ""
+                                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                                if iconImg then
+                                        iconImg.Position = UDim2.new(0, 11, 0.5, -9)
+                                        lbl.Size = UDim2.new(1, -44, 1, 0)
+                                        lbl.Position = UDim2.fromOffset(38, 0)
+                                else
+                                        lbl.Size = UDim2.new(1, -20, 1, 0)
+                                        lbl.Position = UDim2.fromOffset(10, 0)
+                                end
+                        end
+                end
+        end
+        local function applySidebarMode()
+                local iconMode = sheetMode or WIN_W < 420
+                if iconMode == sidebarIconMode then return end
+                sidebarIconMode = iconMode
+                local w = iconMode and SIDEBAR_ICON_W or SIDEBAR_W
+                tabBar.Size = UDim2.new(0, w, 1, -STATUSBAR_H)
+                content.Size = UDim2.new(1, -w, 1, -STATUSBAR_H)
+                content.Position = UDim2.new(0, w, 0, 0)
+                tabDivider.Position = UDim2.new(0, w, 0, 0)
+                refreshTabChipModes()
+                task.defer(function()
+                        if ActiveTab and ActiveTab.Btn and ActiveTab.Btn.Parent then
+                                moveIndicatorTo(ActiveTab.Btn, false)
+                        end
+                end)
+        end
 
         -- The footer owns a taller rounded surface. Its top rounding is above
         -- the visible bar, while its lower rounding precisely follows the
@@ -1882,6 +1970,8 @@ function Library:CreateWindow(cfg)
                 WIN_H = snapPx(h)
                 frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
                 applyShadowBox(WIN_W, WIN_H)
+                -- [v5.5.0] Manual resizes can cross the icon-rail threshold.
+                pcall(applySidebarMode)
         end
         updateLayout = function()
                 local vp = getViewport()
@@ -1898,6 +1988,9 @@ function Library:CreateWindow(cfg)
                         applyWindowSize(FLOAT_W, FLOAT_H)
                         if resizeHandle then resizeHandle.Visible = resizable end
                 end
+                -- [v5.5.0] Sheet-mode transitions and floating resizes both
+                -- re-evaluate the sidebar's icon-rail mode.
+                pcall(applySidebarMode)
                 if sheetMode then
                         -- Track viewport while pinned; handle stays hidden.
                         applyWindowSize(vp.X - 16, vp.Y - 110)
@@ -2559,8 +2652,6 @@ function Library:CreateWindow(cfg)
         -- ============================================================
         -- CreateTab
         -- ============================================================
-        local Tabs = {}
-        local ActiveTab = nil
         replayRevealCascade = function()
                 if ActiveTab and ActiveTab._setActive then
                         pcall(ActiveTab._setActive, true)
@@ -2599,25 +2690,26 @@ function Library:CreateWindow(cfg)
         end
 
         local tabIndicatorSpring = nil
-        local function moveIndicatorTo(btn, animated)
+        moveIndicatorTo = function(btn, animated)
                 local scale = math.max(uiScale.Scale, 0.01)
-                local w = snapPx(btn.AbsoluteSize.X / scale)
-                -- Convert the visible coordinate back into the scrolling
-                -- canvas coordinate so the indicator stays under a tab even
-                -- after the horizontal rail has been scrolled. Y stays fixed:
-                -- the pillar always rides the same strip beneath the chips.
-                local relX = snapPx((btn.AbsolutePosition.X - tabBar.AbsolutePosition.X) / scale
-                        + tabBar.CanvasPosition.X)
-                local goal = UDim2.new(0, relX, 0, TABBAR_H - 8)
-                local goalSize = UDim2.new(0, w, 0, 10)
+                local h = snapPx(btn.AbsoluteSize.Y / scale)
+                -- [v5.5.0] VERTICAL rail: convert the visible Y coordinate
+                -- back into the scrolling canvas coordinate so the edge bar
+                -- stays beside a tab even after the vertical rail has been
+                -- scrolled. X stays fixed: the bar always rides the rail's
+                -- left edge strip.
+                local relY = snapPx((btn.AbsolutePosition.Y - tabBar.AbsolutePosition.Y) / scale
+                        + tabBar.CanvasPosition.Y)
+                local goal = UDim2.new(0, 2, 0, relY)
+                local goalSize = UDim2.new(0, 5, 0, h)
                 if animated and not reducedMotion then
-                        -- [v5.0.0] SPRING: the pillar glides with momentum.
+                        -- [v5.0.0] SPRING: the bar glides with momentum.
                         -- Flicking across tabs retargets mid-flight and the
                         -- velocity carries — interruptible by design.
-                        tabIndicatorSpring = springTo(tabIndicatorSpring, tabIndicator, relX, {
+                        tabIndicatorSpring = springTo(tabIndicatorSpring, tabIndicator, relY, {
                                 stiffness = 320, damping = 26,
                                 apply = function(v)
-                                        tabIndicator.Position = UDim2.new(0, snapPx(v), 0, TABBAR_H - 8)
+                                        tabIndicator.Position = UDim2.new(0, 2, 0, snapPx(v))
                                 end,
                         })
                         Tween(tabIndicator, MT.move, { Size = goalSize })
@@ -2661,14 +2753,11 @@ function Library:CreateWindow(cfg)
                 -- Each tab gets a dedicated title label: button input stays
                 -- independent from text rendering and works consistently on touch.
                 local btnText = iconText ~= "" and (iconText .. "  " .. tabName) or tabName
-                -- Size synchronously from the rendered text. The rail scrolls
-                -- horizontally, so long developer-provided titles stay fully
-                -- readable instead of being cut off by a fixed maximum width.
-                -- [FIX] Use GothamMedium for better emoji rendering + add 8px extra
-                -- width since TextService:GetTextSize may undermeasure emoji glyphs.
-                local measured = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium, Vector2.new(1000, 24))
-                local tabWidth = math.max(76, math.ceil(measured.X) + 36 + (tabIconUri and 26 or 0))
-                btn.Size = UDim2.new(0, tabWidth, 0, TABBAR_H - 10)
+                -- [v5.5.0 MAGMA] Vertical sidebar pill: fixed full-rail width,
+                -- 36px tall, fully rounded (Maclib row discipline × Rayfield
+                -- pill). No text measurement — the rail owns the width and
+                -- long titles truncate with an ellipsis like macOS sidebars.
+                btn.Size = UDim2.new(1, -4, 0, 36)
                 btn.BackgroundColor3 = C.tabChip
                 btn.AutoButtonColor = false
                 btn.BorderSizePixel = 0
@@ -2676,21 +2765,20 @@ function Library:CreateWindow(cfg)
                 btn.Text = ""
                 btn.ZIndex = 4
                 btn.Parent = tabRail
-                corner(btn, R.tab)
+                corner(btn, PILL)
                 local chipStroke = stroke(btn, C.borderAcc, 1)
-                -- [v5.2.0 CRITICAL FIX] The old white-identity UIGradient on the
-                -- chip multiplied with BackgroundColor3 — any theme/path that
-                -- re-applied dark gradient colors rendered the active chip as a
-                -- BLACK box with an orange outline (the reported bug). The chip
-                -- now has NO gradient at all: the solid accent fill renders
-                -- exactly, on every theme, every time.
+                -- [v5.2.0 CRITICAL FIX — PRESERVED] No identity-multiplying
+                -- gradient on the chip fill: the solid accent fill renders
+                -- exactly, on every theme, every time. [v5.5.0] The lava
+                -- signature lives on the EDGE BAR indicator (its own small
+                -- gradient instance) — never multiplied through the chip.
                 -- Render tab text in a dedicated label. This is deliberately
                 -- separate from the button hit target so labels remain visible
                 -- on every client renderer and never compete with input.
                 local textLbl = Instance.new("TextLabel")
                 textLbl.Name = "Title"
-                textLbl.Size = UDim2.new(1, -16, 1, 0)
-                textLbl.Position = UDim2.fromOffset(8, 0)
+                textLbl.Size = UDim2.new(1, -20, 1, 0)
+                textLbl.Position = UDim2.fromOffset(10, 0)
                 textLbl.BackgroundTransparency = 1
                 -- [v5.2.0] ZIndex GUARANTEE: text and icons always render above
                 -- the chip fill and any indicator — the active highlight can
@@ -2700,7 +2788,7 @@ function Library:CreateWindow(cfg)
                 textLbl.Font = Enum.Font.GothamMedium
                 textLbl.TextSize = 12
                 textLbl.TextColor3 = C.text
-                textLbl.TextXAlignment = Enum.TextXAlignment.Center
+                textLbl.TextXAlignment = Enum.TextXAlignment.Left
                 textLbl.TextStrokeTransparency = 0.5
                 textLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
                 textLbl.TextTruncate = Enum.TextTruncate.AtEnd
@@ -2713,13 +2801,13 @@ function Library:CreateWindow(cfg)
                         tabIconImg = Instance.new("ImageLabel")
                         tabIconImg.Name = "TabIcon"
                         tabIconImg.Size = UDim2.fromOffset(18, 18)
-                        tabIconImg.Position = UDim2.new(0, 9, 0.5, -9)
+                        tabIconImg.Position = UDim2.new(0, 11, 0.5, -9)
                         tabIconImg.BackgroundTransparency = 1
                         tabIconImg.Image = tabIconUri
                         tabIconImg.ZIndex = 7 -- [v5.2.0] above the chip fill, always
                         tabIconImg.Parent = btn
-                        textLbl.Position = UDim2.fromOffset(30, 0)
-                        textLbl.Size = UDim2.new(1, -38, 1, 0)
+                        textLbl.Position = UDim2.fromOffset(38, 0)
+                        textLbl.Size = UDim2.new(1, -44, 1, 0)
                 end
 
                 -- Page wrapper (a plain Frame, not CanvasGroup — CanvasGroup is
@@ -2760,14 +2848,16 @@ function Library:CreateWindow(cfg)
                 -- sacrificing the measured, horizontally-scrollable tab rail.
                 local function applyTabTitle()
                         btnText = iconText ~= "" and (iconText .. "  " .. tabName) or tabName
-                        textLbl.Text = btnText
-                        local newMeasure = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium, Vector2.new(1000, 24))
-                        -- [FIX v4.0] Same +36 padding as creation (emoji undermeasure
-                        -- buffer included) plus the icon lane when one is present.
-                        -- The old +28 here made retitled chips ~8px narrower than the
-                        -- identical title at creation and clipped emoji-bearing retitles.
-                        local newWidth = math.max(76, math.ceil(newMeasure.X) + 36 + (tabIconUri and 26 or 0))
-                        btn.Size = UDim2.new(0, newWidth, 0, TABBAR_H - 10)
+                        -- [v5.5.0] The rail owns the chip width — retitling is a
+                        -- pure text swap (long titles ellipsize). Only the edge
+                        -- bar needs a re-snap if the active tab relabels.
+                        tab._fullLabel = btnText
+                        tab._iconText = iconText
+                        if not sidebarIconMode then
+                                textLbl.Text = btnText
+                        elseif iconText ~= "" then
+                                textLbl.Text = iconText
+                        end
                         task.defer(function()
                                 if ActiveTab == tab and btn.Parent then
                                         moveIndicatorTo(btn, false)
@@ -2825,7 +2915,7 @@ function Library:CreateWindow(cfg)
                         -- (+8px) on the move curve. (No CanvasGroup — executors
                         -- vary; the slide alone reads as a clean arrival.)
                         if not skipAnim and not reducedMotion then
-                                page.Position = UDim2.new(0, 8, 0, 0)
+                                page.Position = UDim2.new(0, 0, 0, 8)
                                 Tween(page, MT.move, { Position = UDim2.new(0, 0, 0, 0) })
                         else
                                 page.Position = UDim2.new(0, 0, 0, 0)
@@ -2891,6 +2981,9 @@ function Library:CreateWindow(cfg)
                 end
                 tab._chipStroke = chipStroke
                 tab._textLbl = textLbl
+                tab._tabIconImg = tabIconImg
+                tab._fullLabel = btnText
+                tab._iconText = iconText
                 tab._setActive = setActive
 
                 onTheme(function()
@@ -2927,6 +3020,11 @@ function Library:CreateWindow(cfg)
                 end)
 
                 table.insert(Tabs, tab)
+                -- [v5.5.0] If the rail was already collapsed (narrow window
+                -- resolved its layout before this tab existed), restyle this
+                -- chip to icon mode immediately — must run AFTER the Tabs
+                -- insert above so the refresher can see this tab.
+                if sidebarIconMode then refreshTabChipModes() end
                 if #Tabs == 1 then
                         task.defer(function() setActive(true) end)
                 end

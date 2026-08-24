@@ -163,8 +163,14 @@ end
 local function readDimension(size, axis, fallback)
         if typeof(size) == "Vector2" then return math.floor(size[axis] + 0.5) end
         if typeof(size) == "UDim2" then return math.floor(size[axis].Offset + 0.5) end
-        if type(size) == "table" and type(size[axis]) == "number" then
-                return math.floor(size[axis] + 0.5)
+        if type(size) == "table" then
+                -- [v5.5.0 FIX] The documented API shape is Size = { 560, 580 } —
+                -- an ARRAY table — but only the .X/.Y KEY form was read, so every
+                -- array-form Size silently fell back to the 460×500 default
+                -- (Rayfield accepts every shape; so do we now).
+                if type(size[axis]) == "number" then return math.floor(size[axis] + 0.5) end
+                local idx = axis == "X" and 1 or 2
+                if type(size[idx]) == "number" then return math.floor(size[idx] + 0.5) end
         end
         return fallback
 end
@@ -360,7 +366,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.4.0"
+Library.Version = "5.5.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 

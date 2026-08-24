@@ -1,6 +1,6 @@
 # 👑 RezurXLib
 
-**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.4.0.
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.5.0 "Magma".
 
 ```lua
 local RezurXLib = loadstring(game:HttpGet(
@@ -33,10 +33,14 @@ local RezurXLib = require(game.ReplicatedStorage:WaitForChild("RezurXLib"))
 
 When the library loads you'll see two prints in the executor output:
 ```
-[RezurXLib] v5.4.0 module loaded. LocalPlayer=… PlayerGui=…
+[RezurXLib] v5.5.0 module loaded. LocalPlayer=… PlayerGui=…
 [RezurXLib] CreateWindow called: name="My Panel" theme=Lava host=Auto size=…
 ```
 If neither print appears, the failure is upstream of the library — typically a syntax error in your consumer script. Run `luau-analyze` on your script to find it.
+
+### The Magma layout (v5.5.0)
+
+Tabs live in a **vertical sidebar rail** on the left (Rayfield Gen2 × Maclib cross): pill chips with icons, a lava-gradient edge bar that slides to the active tab, and a 1px accent hairline separating rail from content. On phones and narrow windows (< 420px) the rail collapses to an icon strip automatically. `Size` accepts `{ 600, 580 }` arrays, `{X=…, Y=…}` tables, `Vector2`, or `UDim2`.
 
 ### Callback safety (v5.4.0)
 

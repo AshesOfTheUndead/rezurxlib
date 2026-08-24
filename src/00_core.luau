@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v5.4.0 "Aurora" - self-contained Roblox UI library
+-- RezurXLib v5.5.0 "Magma" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -68,7 +68,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.4.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.5.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))
@@ -114,11 +114,11 @@ local TTOGGLEBG = MT.settle
 -- SHARED CORNER RADII
 -- ============================================================
 local R = {
-        outer  = 20,  -- window shell
+        outer  = 16,  -- window shell (v5.5.0: Rayfield 20 × Maclib 10 cross)
         panel  = 12,  -- cards / popups
         control = 10, -- buttons / inputs
         small  = 8,   -- chips / icon tiles
-        tab    = 10,  -- tab chips
+        tab    = 10,  -- legacy tab chip radius (v5.5.0: live chips use PILL)
 }
 -- PILLS are height-relative: always UDim.new(0.5, 0). Never a fixed
 -- offset that fights the element height.

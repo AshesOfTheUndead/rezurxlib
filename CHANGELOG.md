@@ -1,5 +1,66 @@
 # Changelog
 
+## v5.5.0 "Magma" — Rayfield Gen2 × Maclib visual cross, lava signature
+
+The layout redesign users asked for: the chrome DNA of Rayfield Gen2
+crossed with Maclib's sidebar discipline, wearing RezurXLib's signature
+lava colors. Benchmarked against the live sources of both references.
+
+### 1. Sidebar navigation rail (Maclib × Rayfield)
+
+Tabs moved from the horizontal top strip into a **vertical rail on the
+left** (156px) — Maclib's sidebar discipline with Rayfield's pill
+chips:
+
+- **Pill chips**: fixed full-rail width, 36px tall, fully rounded,
+  emoji/asset icon lane + left-aligned label, macOS-style ellipsis for
+  long titles (no more text measurement — the rail owns the width).
+- **Lava edge-bar selector**: the active-tab indicator is now a 3px
+  vertical bar on the rail's left edge with a soft 5px glow backing,
+  carrying the orangered→amber lava gradient. It slides vertically on
+  the same interruptible spring, and tracks chip height.
+- **Vertical fade masks**: tabs past the rail's edges fade smoothly
+  (top mask appears only once scrolled).
+- **Lava hairline divider**: 1px accent-gradient vertical hairline
+  between rail and content.
+- **Page transitions slide vertically** (content rises 8px) — Maclib's
+  content-motion direction.
+- **Adaptive icon rail**: sheet mode (phones) and narrow floating
+  windows (< 420px) collapse the rail to a 54px icon strip; chips
+  restyle to centered emoji/asset icons. Crosses back automatically.
+  Chips created while collapsed restyle immediately.
+
+### 2. Warm lava-rock surface
+
+The Lava preset's surface moved from a cool navy (11,13,20) to a warm
+lava-rock charcoal (20,15,13) — the whole derived palette (panels,
+borders, header, rail) now reads warm. Window corner radius retuned to
+16px (Rayfield 20 × Maclib 10 cross).
+
+### 3. CRITICAL FIX: array-form Size was silently ignored
+
+`readDimension` only read the `.X`/`.Y` KEY form — the DOCUMENTED
+`Size = { 560, 580 }` array shape fell back to the 460×500 default on
+every consumer (including Restaurant MAX, which believed it was
+running 560×580 and was not). Array `[1]`/`[2]` indices are now read;
+`Vector2`, `UDim2`, and key-form tables keep working. Applies to
+`Size`, `MinSize`, and `MaxSize`.
+
+### Verification
+
+- Bundle rebuilt: 563121 bytes, 9961 lines, byte-identical via
+  `build_bundle.py --check`; `luau-analyze` clean.
+- Headless suite: **273 passed, 0 failures** (13 new v5.5.0 checks:
+  rail geometry, vertical scrolling, divider, pill chips, icon-rail
+  collapse + emoji restyle, edge-bar specs).
+- Restaurant MAX v11 UI block runs end-to-end against v5.5.0:
+  ok=true, zero warnings, correct 600×580 geometry (previously
+  silently 460×500).
+
+---
+
+# Changelog
+
 ## v5.4.0 — the "functional perfection" pass
 
 Benchmarked against the five reference libraries users actually praise —

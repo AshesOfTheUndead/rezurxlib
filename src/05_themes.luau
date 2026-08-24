@@ -255,16 +255,16 @@ end
 
 -- [v5.2.0] Universal preset matrix (Gemini spec table).
 Themes.Lava = buildPreset("Lava",
-        Color3.fromHex("FF4500"), Color3.fromHex("FFAA00"), Color3.fromHex("0B0D14"),
+        Color3.fromRGB(255, 69, 0), Color3.fromRGB(255, 170, 0), Color3.fromRGB(11, 13, 20),
         "Simulators, high-intensity hubs")
 Themes.Cyberpunk = buildPreset("Cyberpunk",
-        Color3.fromHex("00F0FF"), Color3.fromHex("A100FF"), Color3.fromHex("0D0E15"),
+        Color3.fromRGB(0, 240, 255), Color3.fromRGB(161, 0, 255), Color3.fromRGB(13, 14, 21),
         "Exploits, combat, admin tools")
 Themes.Obsidian = buildPreset("Obsidian",
-        Color3.fromHex("3A4454"), Color3.fromHex("A0ABBA"), Color3.fromHex("08090C"),
+        Color3.fromRGB(58, 68, 84), Color3.fromRGB(160, 171, 186), Color3.fromRGB(8, 9, 12),
         "Minimalist & stealth scripts")
 Themes.Emerald = buildPreset("Emerald",
-        Color3.fromHex("00FF88"), Color3.fromHex("00B359"), Color3.fromHex("0A120E"),
+        Color3.fromRGB(0, 255, 136), Color3.fromRGB(0, 179, 89), Color3.fromRGB(10, 18, 14),
         "Utility, ESP, engine trackers")
 
 local ThemeTokenSet = {}

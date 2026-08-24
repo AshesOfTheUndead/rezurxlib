@@ -364,16 +364,16 @@ end
 
 -- [v5.2.0] Universal preset matrix (Gemini spec table).
 Themes.Lava = buildPreset("Lava",
-        Color3.fromHex("FF4500"), Color3.fromHex("FFAA00"), Color3.fromHex("0B0D14"),
+        Color3.fromRGB(255, 69, 0), Color3.fromRGB(255, 170, 0), Color3.fromRGB(11, 13, 20),
         "Simulators, high-intensity hubs")
 Themes.Cyberpunk = buildPreset("Cyberpunk",
-        Color3.fromHex("00F0FF"), Color3.fromHex("A100FF"), Color3.fromHex("0D0E15"),
+        Color3.fromRGB(0, 240, 255), Color3.fromRGB(161, 0, 255), Color3.fromRGB(13, 14, 21),
         "Exploits, combat, admin tools")
 Themes.Obsidian = buildPreset("Obsidian",
-        Color3.fromHex("3A4454"), Color3.fromHex("A0ABBA"), Color3.fromHex("08090C"),
+        Color3.fromRGB(58, 68, 84), Color3.fromRGB(160, 171, 186), Color3.fromRGB(8, 9, 12),
         "Minimalist & stealth scripts")
 Themes.Emerald = buildPreset("Emerald",
-        Color3.fromHex("00FF88"), Color3.fromHex("00B359"), Color3.fromHex("0A120E"),
+        Color3.fromRGB(0, 255, 136), Color3.fromRGB(0, 179, 89), Color3.fromRGB(10, 18, 14),
         "Utility, ESP, engine trackers")
 
 local ThemeTokenSet = {}
@@ -892,7 +892,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.2.0"
+Library.Version = "5.2.1"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -2365,46 +2365,22 @@ function Library:CreateWindow(cfg)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1
                         or inp.UserInputType == Enum.UserInputType.Touch then
                         local dragStart = inp.Position
-                        -- [FIX] Use AbsolutePosition (screen pixels) not Position.Offset
-                        -- Position has scale 0.5/0.55, .Offset gives -WIN_W/2 → flinging
                         local startAbs = frame.AbsolutePosition
                         local moved = false
-                        local lastX = startAbs.X
-                        -- [v5.1.0] HARDWARE DRAG PHYSICS (spec): the window tilts
-                        -- with its movement vector — rotation = clamp(deltaX *
-                        -- 0.03, -3, 3) — and settles back to 0 with a Back ease
-                        -- when the drag ends. Feels like physical weight.
                         if Window.Focus then Window:Focus() end
                         registerDrag("window", inp, function(pos)
                                 local d = pos - dragStart
                                 if not moved and d.Magnitude < 5 then return end
                                 if not moved then
                                         moved = true
-                                        -- Position itself follows the pointer directly;
-                                        -- only depth cues animate, so drag remains crisp.
                                         setShadowTransparency("lift")
                                         Tween(frameStroke, T15, { Transparency = 0.15 })
                                 end
                                 local targetX, targetY = clampWindowPosition(startAbs.X + d.X, startAbs.Y + d.Y)
                                 moveWindowTo(targetX, targetY)
-                                -- Tilt from the instantaneous horizontal movement.
-                                if not reducedMotion then
-                                        local velX = (startAbs.X + d.X) - lastX
-                                        lastX = startAbs.X + d.X
-                                        local tilt = math.clamp(velX * 0.55, -3, 3)
-                                        if math.abs(tilt) > 0.05 then
-                                                frame.Rotation = tilt
-                                        end
-                                end
                         end, function()
                                 setShadowTransparency("rest")
                                 Tween(frameStroke, T15, { Transparency = 0.55 })
-                                -- Settle the tilt back to level with an overshoot.
-                                if not reducedMotion then
-                                        Tween(frame, MT.enter, { Rotation = 0 })
-                                else
-                                        frame.Rotation = 0
-                                end
                         end)
                 end
         end))
@@ -3550,14 +3526,13 @@ function Library:CreateWindow(cfg)
                         textLbl.Size = UDim2.new(1, -38, 1, 0)
                 end
 
-                -- [v5.1.0] Page lives inside a CanvasGroup so tab switches can
-                -- fade the WHOLE panel (group transparency) while it slides
-                -- +8px horizontally — the spec's panel transition.
-                local pageGroup = Instance.new("CanvasGroup")
+                -- Page wrapper (a plain Frame, not CanvasGroup — CanvasGroup is
+                -- not universally supported across executors and can render
+                -- content invisible on some clients).
+                local pageGroup = Instance.new("Frame")
                 pageGroup.Name = "PageGroup"
                 pageGroup.Size = UDim2.new(1, 0, 1, 0)
                 pageGroup.BackgroundTransparency = 1
-                pageGroup.GroupTransparency = 0
                 pageGroup.Visible = false
                 pageGroup.Parent = content
                 local page = Instance.new("ScrollingFrame")
@@ -3650,17 +3625,13 @@ function Library:CreateWindow(cfg)
                         ActiveTab = tab
                         tab.Page.Visible = true
                         pageGroup.Visible = true
-                        -- [v5.1.0] PANEL TRANSITION (spec): the incoming content
-                        -- slides in horizontally (+8px offset) with a 0.18s
-                        -- CanvasGroup transparency fade.
+                        -- Panel transition: the incoming page slides in horizontally
+                        -- (+8px) on the move curve. (No CanvasGroup — executors
+                        -- vary; the slide alone reads as a clean arrival.)
                         if not skipAnim and not reducedMotion then
-                                pageGroup.GroupTransparency = 1
                                 page.Position = UDim2.new(0, 8, 0, 0)
-                                Tween(pageGroup, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                                        { GroupTransparency = 0 })
                                 Tween(page, MT.move, { Position = UDim2.new(0, 0, 0, 0) })
                         else
-                                pageGroup.GroupTransparency = 0
                                 page.Position = UDim2.new(0, 0, 0, 0)
                         end
                         -- [v4.3.0] ACTIVE TAB = ACCENT FILL: the selected tab is a
@@ -5141,14 +5112,10 @@ function Library:CreateWindow(cfg)
                                 )
                                 local maxHeight = math.max(1, viewport.Y - margin * 2)
 
-                                -- [v5.1.0] 3D CARD UNFOLD (spec): the list renders inside
-                                -- a CanvasGroup so the whole popup can alpha-unfold, and
-                                -- every option row drops in on a 0.02s stagger.
-                                local listGroup = Instance.new("CanvasGroup")
+                                local listGroup = Instance.new("Frame")
                                 listGroup.Name = "DropdownPopupGroup"
                                 listGroup.Size = UDim2.fromOffset(px(width), 0)
                                 listGroup.BackgroundTransparency = 1
-                                listGroup.GroupTransparency = 1
                                 listGroup.ZIndex = 61
                                 listGroup.Parent = overlayGui
                                 local list = Instance.new("ScrollingFrame")
@@ -5405,8 +5372,8 @@ function Library:CreateWindow(cfg)
                                                         Tween(row, MT.move, { Position = origPos, BackgroundTransparency = 0 })
                                                 end)
                                         end
-                                        Tween(listGroup, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-                                                { GroupTransparency = 0 })
+                                        -- No GroupTransparency (CanvasGroup removed);
+                                        -- the staggered row drop IS the unfold.
                                 end
 
                                 if searchBox then

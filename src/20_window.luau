@@ -700,37 +700,37 @@ function Library:CreateWindow(cfg)
                         applyShadowBox(w, h)
                 end
                 runEntrance = function()
-                        local ok = pcall(function()
-                                frame.BackgroundTransparency = 1
-                                frameStroke.Transparency = 1
-                                shadow.Visible = true
-                                if shadowIsImage then
-                                        shadow.ImageTransparency = 1
-                                else
-                                        shadow.BackgroundTransparency = 1
-                                end
-                                if reducedMotion then
-                                        -- Instant token: write the end state directly.
-                                        applyWinSize(WIN_W, WIN_H)
-                                        frame.BackgroundTransparency = 0
-                                        frameStroke.Transparency = 0.55
+                        -- [v5.2.2] HARDENED ENTRANCE: the frame is NEVER hidden.
+                        -- Previous pattern set BackgroundTransparency = 1 then faded
+                        -- back in via Tween — on executors where TweenService misbehaves,
+                        -- the fade-in never landed and the window stayed invisible.
+                        -- Now the frame stays at transparency 0 throughout; only the
+                        -- Size springs carry the arrival motion.
+                        pcall(function()
+                                if shadow then
+                                        shadow.Visible = true
                                         if shadowIsImage then
                                                 shadow.ImageTransparency = SHADOW_REST - 0.15
                                         else
                                                 shadow.BackgroundTransparency = SHADOW_REST
                                         end
-                                        return
                                 end
-                                -- Grow from a smaller integer rect to the resting
-                                -- size; springs carry the motion budget with them.
+                        end)
+                        if reducedMotion then
+                                -- Instant token: write the end state directly.
+                                applyWinSize(WIN_W, WIN_H)
+                                pcall(function() frame.BackgroundTransparency = 0 end)
+                                pcall(function() frameStroke.Transparency = 0.55 end)
+                                return
+                        end
+                        -- Shrink to the smaller integer rect, then spring-grow to
+                        -- the resting size. Frame stays visible the whole time;
+                        -- springs are interruptible so a viewport change mid-flight
+                        -- retargets instead of fighting.
+                        local ok = pcall(function()
                                 applyWinSize(enterW, enterH)
-                                Tween(frame, T40, { BackgroundTransparency = 0 })
-                                Tween(frameStroke, T40, { Transparency = 0.55 })
-                                if shadowIsImage then
-                                        Tween(shadow, T40, { ImageTransparency = SHADOW_REST - 0.15 })
-                                else
-                                        Tween(shadow, T40, { BackgroundTransparency = SHADOW_REST })
-                                end
+                                frame.BackgroundTransparency = 0
+                                frameStroke.Transparency = 0.55
                                 -- Aurora Trace: one full accent lap on arrival.
                                 traceLap(C.accent, 1)
                                 entranceSpringTable[1] = springTo(entranceSpringTable[1], frame, WIN_W, {
@@ -749,14 +749,9 @@ function Library:CreateWindow(cfg)
                         end)
                         if not ok and frame.Parent then
                                 -- Never leave a half-entranced window on screen.
-                                applyWinSize(WIN_W, WIN_H)
-                                frame.BackgroundTransparency = 0
-                                frameStroke.Transparency = 0.55
-                                if shadowIsImage then
-                                        shadow.ImageTransparency = SHADOW_REST - 0.15
-                                else
-                                        shadow.BackgroundTransparency = SHADOW_REST
-                                end
+                                pcall(applyWinSize, WIN_W, WIN_H)
+                                pcall(function() frame.BackgroundTransparency = 0 end)
+                                pcall(function() frameStroke.Transparency = 0.55 end)
                         end
                 end
                 -- The play is deferred until after frameStroke/Trace exist
@@ -1901,7 +1896,32 @@ function Library:CreateWindow(cfg)
 
         -- [v5.0.0] Entrance plays only AFTER layout is resolved (sheet mode
         -- may have resized the window): the springs target the FINAL size.
-        if not keyGatePending then task.spawn(runEntrance) end
+        -- [v5.2.2] pcall the spawn so a buggy executor's task.spawn can
+        -- never strand the window invisible. A 1s watchdog then FORCES the
+        -- window to its resting state regardless of entrance success — the
+        -- "UI doesn't show up" regression ends here.
+        if not keyGatePending then
+                pcall(function() task.spawn(runEntrance) end)
+                task.delay(1, function()
+                        pcall(function()
+                                if not frame.Parent or not frame.Parent.Parent then return end
+                                local w, h = WIN_W, WIN_H
+                                frame.Size = UDim2.new(0, w, 0, h)
+                                frame.Position = UDim2.new(0.5, -snapPx(w / 2), 0.5, -snapPx(h / 2))
+                                applyShadowBox(w, h)
+                                frame.BackgroundTransparency = 0
+                                frameStroke.Transparency = 0.55
+                                if shadow then
+                                        shadow.Visible = true
+                                        if shadowIsImage then
+                                                shadow.ImageTransparency = SHADOW_REST - 0.15
+                                        else
+                                                shadow.BackgroundTransparency = SHADOW_REST
+                                        end
+                                end
+                        end)
+                end)
+        end
 
         -- ------------------------------------------------------------
         -- POPUP MANAGER

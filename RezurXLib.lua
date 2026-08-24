@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v4.0 "Aurora" - self-contained Roblox UI library
+-- RezurXLib v5.3.1 "Aurora" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -44,8 +44,36 @@ local HttpService      = game:GetService("HttpService")
 local SoundService     = game:GetService("SoundService")
 local Lighting         = game:GetService("Lighting")
 
-local player    = Players.LocalPlayer
-local playerGui = player and player:WaitForChild("PlayerGui")
+-- [v5.3.1] NON-YIELDING PLAYER RESOLUTION. The previous pattern
+-- (player:WaitForChild("PlayerGui")) at module top yielded the entire
+-- loadstring chunk on first run; in some executor bootstraps that yield
+-- never resumed if the executor's main thread was already in a task
+-- chain, leaving the returned Library nil and the consumer's
+-- `Library:CreateWindow(...)` call to silently fail. We now do a
+-- non-yielding FindFirstChild; the live PlayerGui is re-resolved on
+-- demand inside resolvePlayerGui() (which already handles nil).
+local player = Players.LocalPlayer
+local playerGui
+if player then
+        pcall(function()
+                playerGui = player:FindFirstChildOfClass("PlayerGui")
+        end)
+end
+-- [v5.3.1] DIAGNOSTIC BANNER: prints exactly once when the module
+-- loads so a consumer can confirm (in the executor's output panel)
+-- that the loadstring chunk actually ran to completion. Previously a
+-- silent failure meant the consumer had no way to tell whether the
+-- library never loaded or just never rendered. The banner is gated on
+-- RunService:IsStudio() off so plain Studio runs without a print storm
+-- when the same script is attached to multiple windows.
+pcall(function()
+        if RunService and not RunService:IsStudio() then
+                print(("[RezurXLib] v5.3.1 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                        tostring(player),
+                        tostring(playerGui and playerGui.Name or "pending")
+                ))
+        end
+end)
 
 -- ============================================================
 -- TWEEN PRESETS
@@ -932,7 +960,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.3.0"
+Library.Version = "5.3.1"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -941,6 +969,27 @@ Library.Options = { ReducedMotion = false }
 -- ============================================================
 function Library:CreateWindow(cfg)
         cfg = cfg or {}
+        -- [v5.3.1] DIAGNOSTIC ENTRY BANNER. The most common consumer-side
+        -- failure is "nothing shows up": previously the library silently
+        -- swallowed errors inside the long CreateWindow body, so the user
+        -- could not tell whether the call was reached, the host detection
+        -- failed, or an internal instance step threw. We now print a
+        -- one-line banner at the very top so the executor's output panel
+        -- shows the call landed; if the window then fails to appear, the
+        -- search space narrows to host detection or render path. Gated
+        -- behind pcall + RunService:IsStudio() off so Studio runs stay
+        -- quiet (the headless suite injects a fake RunService that IS
+        -- Studio, so the suite output stays clean).
+        pcall(function()
+                if RunService and not RunService:IsStudio() then
+                        print(("[RezurXLib] CreateWindow called: name=%q theme=%s host=%s size=%s"):format(
+                                tostring(cfg.Name or cfg.Title or "RezurX UI"),
+                                tostring(cfg.Theme or "Quiet"),
+                                tostring(cfg.Host or "Auto"),
+                                tostring(cfg.Size or "460x500 default")
+                        ))
+                end
+        end)
         -- [v5.2.0] Universal aliases: Title/SubTitle map onto Name/Subtitle so
         -- scripts written against other libraries drop in unchanged.
         local windowName   = cfg.Name or cfg.Title or "RezurX UI"

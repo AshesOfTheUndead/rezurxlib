@@ -1,309 +1,288 @@
-# 👑 RezurXLib v5.2.0 "Universal"
+# 👑 RezurXLib
 
-**A universal, premium UI library for Roblox** — built by RezurXLab for developers, trusted by players. The **Refined Depth** edition.
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.3.1.
+
+```lua
+local RezurXLib = loadstring(game:HttpGet(
+  "https://raw.githubusercontent.com/AshesOfTheUndead/rezurxlib/main/RezurXLib.lua"
+))()
+local Window = RezurXLib:CreateWindow({ Name = "My Panel", Theme = "Lava" })
+local Tab = Window:CreateTab("Main", "🏠")
+Tab:CreateButton({ Name = "Click", Callback = function() print("hi") end })
+```
 
 ---
 
-## 📦 What Is RezurXLib?
+## Install
 
-RezurXLib is a **complete, self-contained UI framework** for Roblox. It provides everything you need to build beautiful, functional, and reliable interfaces — whether you're creating an admin panel, a settings menu, a game hub, or any other in-game UI.
+**Executor** — one line, no ModuleScript needed:
+```lua
+local RezurXLib = loadstring(game:HttpGet(
+  "https://raw.githubusercontent.com/AshesOfTheUndead/rezurxlib/main/RezurXLib.lua"
+))()
+```
 
-**It works everywhere:** CoreGui, PlayerGui, executors, and any environment that supports standard Roblox APIs.
+**Studio** — drop `RezurXLib.lua` into a `ModuleScript` named `RezurXLib` under `ReplicatedStorage`, then:
+```lua
+local RezurXLib = require(game.ReplicatedStorage:WaitForChild("RezurXLib"))
+```
+
+**Global** — after first load, the library is also reachable as `_G.RezurXLib`.
+
+### Diagnostic banners (v5.3.1)
+
+When the library loads you'll see two prints in the executor output:
+```
+[RezurXLib] v5.3.1 module loaded. LocalPlayer=… PlayerGui=…
+[RezurXLib] CreateWindow called: name="My Panel" theme=Lava host=Auto size=…
+```
+If neither print appears, the failure is upstream of the library — typically a syntax error in your consumer script. Run `luau-analyze` on your script to find it.
 
 ---
 
-## ✨ What's New in v4.0 "Aurora"
+## CreateWindow — config reference
 
-### 🌍 Universal (v5.2.0)
-- **Critical fix**: the active tab can never render as a blank black box again (gradient hazard deleted, explicit white text, ZIndex guarantees)
-- **Preset themes**: `Lava` · `Cyberpunk` · `Obsidian` · `Emerald` — full contrast ladders derived automatically
-- **`CustomTheme`**: `{ PrimaryAccent = …, CardBackground = …, TextMain = … }` with auto-derived shades; raw tokens too
-- **Active toggle glow**: cards glow neon accent while ON (0.4 stroke transparency)
-- **Top edge accent line**: accent→secondary gradient seals the window (and the minimized pill)
-- **Activity beacon**: `SetActivity("running"/"paused")` — breathing dot beside the logo
-- **Quick pause**: `cfg.QuickPause = fn` — freeze features from the minimized bar
-- **`Tab:AddStatGrid`**: universal telemetry chips — `:AddChip`, `:UpdateChip`, auto-polling `Sample`
-- **Tab fade masks**: overflowing tabs fade at the rail edges
-- **`Title`/`SubTitle` aliases** for drop-in compatibility
+```lua
+local Window = RezurXLib:CreateWindow({
+    Name             = "My Panel",      -- or Title =
+    Subtitle         = "v1.0",
+    LoadingTitle     = "MY PANEL",      -- shown on the boot splash
+    LoadingEnabled   = true,
+    Theme            = "Lava",          -- see Themes below
+    ToggleUIKeybind  = Enum.KeyCode.K,  -- show/hide
+    Size             = { 460, 500 },    -- {X, Y}, defaults to 460×500
+    Icon             = 4483362458,      -- number id / "rbxassetid://" / emoji text
+    Activity         = "running",       -- "running" | "paused" — header beacon
+    QuickPause       = function(paused) end,   -- paused pill in the minimized bar
+    Density          = "comfortable",  -- "compact" | "comfortable" (auto on mobile)
+    DisplayOrder     = 9999,            -- ScreenGui z-order (default 9999)
+    Sounds           = true,            -- tactical click table
+    BackdropBlur     = true,            -- frost the world behind the window
+    ShadowImage      = "rbxassetid://…",  -- optional 9-slice soft shadow
+    ConfigurationSaving = { … },       -- see below
+    KeySystem       = true,            -- see below
+    KeySettings     = { … },
+})
+```
 
-### 🎮 Kinetic (v5.1.0) — the micro-interaction blueprint
-- **Buttons**: 0.96x spring press + 20° sheen sweep across the face + metallic tick
-- **Toggles**: elastic pill morph (taffy-pull knob, Back snap) + active border bloom
-- **Tabs**: gliding glass pillar + CanvasGroup panel slide/fade
-- **Sliders**: spring value tooltip above the thumb + friction tick per step
-- **Dropdowns**: CanvasGroup alpha-unfold with 0.02s staggered row cascade
-- **Keybinds**: breathing pulse-ring listener + hum, snap-confirm on capture
-- **Inputs**: neon focus flare + floating mini-label; **Color picker**: hex copy
-- **Key gate**: step unlock sequence with glowing checkmarks
-- **Drag physics**: the window tilts ±3° with its movement vector, Back-settles level
-- **Sound map**: the full tactile table (opt-in `Sounds = true`)
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `Name` / `Title` | string | "RezurX UI" | Window title |
+| `Subtitle` / `SubTitle` | string | "Control center" | Subtitle |
+| `Theme` | string\|table | "Quiet" | Preset name or raw palette |
+| `CustomTheme` | table | — | `{ PrimaryAccent=, SecondaryAccent=, CardBackground=, WindowBackground=, TextMain=, … }` — auto-derives the ladder |
+| `ToggleUIKeybind` | Enum.KeyCode | K | Show/hide toggle |
+| `Size` | {X, Y} | {460, 500} | Clamped to 320×360 … 1200×900 |
+| `Icon` | number\|string | — | Asset id, `rbxassetid://…` URI, or emoji text |
+| `Host` | string | "Auto" | `"Auto"` (gethui→CoreGui→PlayerGui) · `"PlayerGui"` · `"CoreGui"` · `"gethui"` · `cfg.Parent` |
+| `DisplayOrder` | number | 9999 | ScreenGui z-order |
+| `Density` | string | auto | `"compact"` for phones, `"comfortable"` for desktop |
+| `Sounds` | bool\|table | false | Click sounds (v4.4) |
+| `BackdropBlur` | bool | false | Frosts the world (refcounted) |
+| `ShadowImage` | string | — | Optional 9-slice shadow asset |
+| `Activity` | string | — | `"running"` / `"paused"` header beacon |
+| `QuickPause` | function | — | Called from the minimized pill |
+| `ReducedMotion` | bool | false | Disable all animation |
+| `AnimatedAccents` | bool | false | Opt-in ambient loops |
 
-### ✨ Trace (v5.0.0) — the big one
-- **Geometry law**: concentric radii enforced in code, single-instance shadow, integer-pixel resting offsets, true pills, zero UIScale entrances — corners are clean at any zoom
-- **Motion engine**: interruptible velocity-preserving springs, exactly four motion tokens, a 12-spring budget cap, and a silent frame-time guard that degrades on slow hosts
-- **Aurora Trace**: one accent light travels the window border — entrance lap, tab-switch quarter-lap, success lap, error lap in red. Six competing effects deleted to make room
-- **Mobile first-class**: Compact/Comfortable density, near-fullscreen sheet mode under 500px, 44px touch targets, full ReducedMotion coverage
-- **Repo hygiene**: .env removed (rotate your DATABASE_URL), scaffold deleted, src/ modules + byte-identical build script, 167-test headless suite
+---
 
-### 🔮 Prism (v4.4.0)
-- **Pixel-perfect fixes** — status bar breathing room, clean minimize (no orange stripe), centered FPS divider, uniform section rules
-- **Sliding underline tab indicator** — a 3px accent bar that glides beneath the active tab
-- **Button glow halos** — soft accent halos that fade in on hover; primary buttons glow at rest
-- **Glassmorphism** — opt-in `BackdropBlur = true` frosts the world behind the window
-- **Animated light strips** — pulsing section ticks, sweeping button spines (UIGradient.Offset)
-- **Squishy toggle physics** — the thumb stretches as it travels and springs back
-- **CreateGraph** — live sparkline: `:Push(value)` or auto-`Sample`, scrolling window, auto-scale
-- **UI sound design** — opt-in `Sounds = true`, pitched per action, engine-local assets
-- **Keybind badge** — the footer shows a live `[K] HIDE` shortcut pill
+## Window methods
 
-### 🌶️ Spice (v4.3.0)
-- **Active tab = accent fill** — the selected tab is a solid accent chip with white bold text, exactly as requested
-- **Signature accent spines** — a 3px accent bar on every button that lights up and grows on hover
-- **Hover raises** — buttons lift 1.5% on hover; the chevron slides and turns accent
-- **Section headers with hierarchy** — accent tick + gradient rule from every title
+| Method | Returns | Description |
+|---|---|---|
+| `:CreateTab(name, icon)` | Tab | icon is emoji text or asset id/URI |
+| `:Notify({ Title, Content, Duration, Type, Actions })` | toast | Type: `"info"`/`"success"`/`"warn"`/`"error"` |
+| `:ShowModal({ Title, Content, ConfirmText, CancelText, ConfirmCallback, CancelCallback })` | `:Confirm`/`:Cancel`/`:Close` | Confirmation dialog |
+| `:SaveConfiguration()` | table | Write flagged values to disk (if `ConfigurationSaving.Enabled`) |
+| `:LoadConfiguration()` | appliedCount | Read and replay saved values onto elements |
+| `:ModifyTheme(name\|palette)` | palette | Swap theme live |
+| `:CreateSettingsPanel(name?, icon?)` | Tab | Built-in settings tab (themes, motion, sounds) |
+| `:SetToggleKeybind(keycode)` | Enum.KeyCode | Rebind the show/hide key |
+| `:OpenCommandPalette()` | overlay | Ctrl+K palette |
+| `:SetBrandText(text)` | applied text | Header badge (≤4 UTF-8 chars) |
+| `:SetRestoreText(text)` | applied text | Floating restore button text |
+| `:Destroy()` | — | Clean up everything |
 
-### 🎰 The Jackpot Entrance (v4.2.0)
-- **Spring landing** — the window pops in with a Back overshoot; it *lands*, not fades
-- **Accent-line ignition** — the header strip sweeps on like a lightsaber
-- **One-shot shockwave** — an accent ring bursts from behind the window and dissipates
-- **Reward cascade** — every card pops with an accent stroke flash; the page rises into place
-- **Reveal pop** — toggling the menu open replays the spring + cascade every time
-- **Concentric curves** — shadow layers, accent rim, and glow now follow the parallel-curve law; pills are true pills
+---
 
-### 🪟 Refined Depth & Motion (v4.0.1)
-- **Layered depth shadows** — three stacked soft halos hug the window tightly for a real gaussian-blur feel, no image assets. Dragging or resizing deepens the shadow so the window feels physically lifted
-- **Subtle accent rim** — a faint accent-tinted glow hugs the window edge for branded presence
-- **Spring entrance** — the window materializes with a gentle scale-and-fade
-- **Staggered tab openings** — cards settle softly in sequence when you switch tabs
-- **Choreographed entrances everywhere** — modals, color pickers, context menus, and the command palette now scale-settle in instead of popping (v4.1.0)
-- **Button micro press-feedback** — buttons dip 3% on press and spring back (v4.1.0)
+## Tab — components
 
-All of it respects `ReducedMotion` and `MotionScale`. Ambient pulse loops (logo glow, glow-strip shimmer) are opt-in via `AnimatedAccents = true`.
+| Method | Returns | Notes |
+|---|---|---|
+| `:CreateSection(text)` | `:Set` | Uppercase section label |
+| `:CreateDivider(text?)` | obj | Optional-caption rule |
+| `:CreateSpacer(pixels?)` | obj | Vertical gap |
+| `:CreateLabel(Text, Color?, Bold?, TextSize?, Align?)` | `:Set`/`:SetColor` | Static text line |
+| `:CreateParagraph(Title, Content)` | obj | Wrapped title + body |
+| `:CreateImage(Image, Height?, ScaleType?, CornerRadius?, Tooltip?)` | obj | Inline image |
+| `:CreateButton({ Name, Variant?, Icon?, Callback, Tooltip? })` | `:Set` | Variant: `"Primary"` / `"Secondary"` |
+| `:CreateMultiButton({ Buttons, Tooltip? })` | obj | Shared-row actions |
+| `:CreateToggle({ Name, CurrentValue?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Animated boolean |
+| `:CreateSlider({ Name, Range, CurrentValue, Increment?, Suffix?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Pointer + touch |
+| `:CreateInput({ Name, CurrentValue?, PlaceholderText?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Single-line |
+| `:CreateTextArea({ Title, Text?, Placeholder?, Callback?, Flag? })` | `:Set`/`:Get`/`:Reset` | Multi-line |
+| `:CreateDropdown({ Name, Options, CurrentOption?, MultipleOptions?, Searchable?, Tooltip?, Callback, Flag? })` | `:Set`/`:Get`/`:Refresh`/`:Reset` | Single/multi with fuzzy search |
+| `:CreateKeybind({ Name, CurrentKeybind?, HoldToInteract?, Callback, ChangedCallback?, Flag? })` | `:Set`/`:Get`/`:Reset` | Click to rebind |
+| `:CreateColorPicker({ Name, Color?, Presets?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | HSV + RGB + Hex + swatches |
+| `:CreateAccordion({ Title, DefaultExpanded?, Tooltip? })` | obj | Collapsible container — call its `:Create*` to add children |
+| `:CreateBindable({ Name, Keybind?, Enabled?, Callback, Flag? })` | `:SetEnabled`/`:SetKeybind` | Toggle + keybind combined |
+| `:CreateNotice({ Title, Content, Type?, Height?, Tooltip? })` | `:Set`/`:SetType` | Durable inline callout |
+| `:CreateProgress({ Title, Value, Min?, Max?, Suffix?, Callback?, Flag? })` | `:Set`/`:Get`/`:Reset` | Live meter |
+| `:CreateSpinner({ Title, Detail?, Running?, Tooltip?, Flag? })` | `:Start`/`:Stop`/`:Set`/`:Get` | On-demand loader |
+| `:CreateCarousel({ Items, CurrentIndex?, Callback?, Tooltip?, Flag? })` | `:Next`/`:Previous`/`:SetItems`/`:Get` | Rotating content |
+| `:CreateContextMenu({ Name, ButtonText, Items, Tooltip?, Flag? })` | `:Open`/`:Close`/`:SetItems` | On-demand action menu |
+| `:CreateStatus({ Title, Text, State?, Detail?, Value?, Flag? })` | `:Set`/`:Get` | Status indicator |
+| `:CreateGraph({ Name, Max?, Bars?, Height?, Suffix?, Sample?, RefreshRate?, Tooltip?, Flag? })` | `:Push`/`:Reset`/`:SetMax`/`:Get` | Live sparkline |
+| `:AddStatGrid({ Columns, UpdateRate?, ChipHeight?, Flag?, Tooltip? })` | `:AddChip`/`:UpdateChip`/`:RemoveChip`/`:GetChipCount` | Telemetry chips |
+| `:CreateCodeBlock({ Title, Content, CopyCallback?, Height? })` | `:Set`/`:Get` | Monospace copyable |
+| `:CreateTable({ Title, Columns, Rows, OnRowActivated?, Height? })` | `:SetRows`/`:GetRows` | Compact data grid |
 
-> **v4.0.1:** The cursor glow, frosted-glass card sheens, header shimmer sweeps, and button sheens from v4.0.0 were removed after feedback — they read as gimmicky. The look is now depth and restraint.
+Every component accepts an optional `Flag = "name"` to opt into `ConfigurationSaving`. Element objects support `:Set()` to programmatically update their state.
 
-### 🖼️ Icon Support (Rayfield-style, no remote atlas)
-- `CreateWindow({ Icon = 4483362458 })` — number asset ids, `"rbxassetid://…"` / `"rbxasset://…"` / `"rbxthumb://…"` URIs, or emoji text in the header badge
-- `Window:CreateTab("Main", icon)` — same resolution on tabs (image or emoji)
-- **Element icons** — `Icon = …` on Buttons, Toggles, Sliders, Inputs, Dropdowns, Keybinds, and Color Pickers — Rayfield only puts icons on the topbar and tabs
-- Works fully offline: no icon atlas download, no HTTP dependency
+---
 
-### 💾 Configuration Auto-Save
+## Themes
+
+Built-in presets:
+- **`Quiet`** — the default neutral palette
+- **`Lava`** — warm orange/red
+- **`Cyberpunk`** — neon pink/cyan
+- **`Obsidian`** — dark with violet accent
+- **`Emerald`** — green on charcoal
+
+Register your own:
+```lua
+RezurXLib:RegisterTheme("Violet", {
+    accent    = Color3.fromRGB(136, 105, 244),
+    accentHi  = Color3.fromRGB(193, 174, 255),
+    accentDim = Color3.fromRGB(88, 66, 170),
+    secondary = Color3.fromRGB(244, 105, 192),
+    -- missing tokens inherit from Quiet
+})
+
+-- Or override per-window without registering:
+Window = RezurXLib:CreateWindow({
+    CustomTheme = {
+        PrimaryAccent   = Color3.fromRGB(136, 105, 244),
+        SecondaryAccent = Color3.fromRGB(244, 105, 192),
+        CardBackground  = Color3.fromRGB(28, 22, 48),
+        WindowBackground= Color3.fromRGB(20, 16, 36),
+        TextMain        = Color3.fromRGB(240, 235, 255),
+    },
+    -- Raw token passthrough also works: { accent = …, panel = …, bg = …, … }
+})
+```
+
+List at runtime: `RezurXLib:GetThemeNames()`.
+
+---
+
+## ConfigurationSaving (auto-save to disk)
+
 ```lua
 ConfigurationSaving = {
-    Enabled   = true,
-    FolderName = "RezurXHub",   -- default: RezurXLib/Configurations
-    FileName  = "AdminPanel",   -- default: game.PlaceId
-    Autosave  = true,           -- signature-diffed, no rewrite storms
-    SaveOnUnload = true,        -- flush on :Destroy()
-    Notify    = true,           -- toast after restoring
+    Enabled      = true,
+    FolderName   = "MyHub",        -- default: "RezurXLib/Configurations"
+    FileName     = "AdminPanel",   -- default: game.PlaceId
+    Autosave     = true,           -- signature-diffed (no rewrite storms)
+    SaveOnUnload = true,           -- flush on :Destroy()
+    Notify       = true,           -- toast after restoring
 },
 ```
-Every element with a `Flag` persists itself to JSON on the executor filesystem and restores on the next run — toggles, sliders, dropdowns, inputs, keybinds, color pickers. Improvements over Rayfield's equivalent:
-- **Writes only when values actually changed** (2-second signature diffing, not a full rewrite per click)
+
+Every element with a `Flag` persists itself to JSON on the executor filesystem and restores on the next run. Improvements over Rayfield's equivalent:
+- **Writes only when values actually changed** (2-second signature diffing)
 - **Per-window flag isolation** — multiple windows never mix their configs
 - **Loads only after the key gate passes** — callbacks never replay behind a locked UI
-- Manual control too: `Window:SaveConfiguration()` / `Window:LoadConfiguration()`
+- **Manual control**: `Window:SaveConfiguration()` / `Window:LoadConfiguration()`
 
-### 🔑 Key System
+---
+
+## KeySystem
+
 ```lua
 KeySystem = true,
 KeySettings = {
-    Title = "My Hub", Subtitle = "Key System",
-    Note = "Get a key from our Discord.",
+    Title    = "My Hub",
+    Subtitle = "Key System",
+    Note     = "Get a key from our Discord.",
     FileName = "MyHubKey",       -- saved under RezurXLib/Keys/
-    SaveKey = true,              -- remember accepted keys (exact-match, not substring)
-    GrabKeyFromSite = false,     -- optional: fetch the key from a raw URL
-    Key = { "KEY-1", "KEY-2" },  -- string or list
+    SaveKey  = true,             -- remember accepted keys (exact-match)
+    GrabKeyFromSite = false,     -- or a raw URL to fetch the key
+    Key      = { "KEY-1", "KEY-2" },  -- string or list
     MaxAttempts = 5,             -- 0 = unlimited
     OnExhausted = "Lock",        -- "Lock" | "Kick" | "None"
 },
 ```
-A styled unlock card in the library's own design language (no external ScreenGui asset download, unlike Rayfield): elastic shake on wrong keys, attempt counter, saved-key skip, and a configurable exhaustion policy. The entrance animation defers until the gate passes.
 
-### 🐛 22 Bug Fixes
-Including two critical ones that explain the most common "ghost UI" reports:
-- **ReplaceExisting destroyed the old ScreenGui but never ran the old window's cleanup** — keybinds kept firing twice, a mid-flight drag kept erroring against destroyed widgets. The Window object itself is now destroyed and deregistered.
-- **`Library:Destroy()` skipped every second window** while mutating the table it was iterating.
-- …plus: resize-vs-minimize desync (`minimized` was a global read), stranded drags when popups close mid-drag, ColorPicker firing the live callback on open, Searchable dropdowns self-destructing when the mobile keyboard appeared, tooltips floating after their owner died, ripples landing off-center under `uiScale`, slider initial values ignoring `Increment`, `obj:Set({Value=…})` with fresh tables, Escape unable to close the command palette while typing, stuck drags when the OS swallows touch release (TouchEnded watchdog + 30s session watchdog), and more. See `CHANGELOG.md`.
-
-### 📱 Mobile Hardened
-- 40×40 resize-grip hit area (visible grip unchanged)
-- Searchable dropdowns survive the on-screen keyboard's viewport resize
-- Motion preferences now apply to the popup layer (dropdowns, pickers, modals, palette)
-- Scale-correct ripples, clamped tooltips, re-read viewport bounds during icon drags
+A styled unlock card in the library's own design language (no external asset download). Elastic shake on wrong keys, attempt counter, saved-key skip, configurable exhaustion policy. The entrance animation defers until the gate passes.
 
 ---
 
-## 🧩 Complete Component Library
-| Component | Description |
-|-----------|-------------|
-| **Window** | Draggable, minimizable, closeable, resizable, spring entrance |
-| **Tabs** | Auto-sizing, scrollable, sliding indicator, image or emoji icons |
-| **Buttons** | Ripple feedback, hover states, callback error handling |
-| **Toggles** | Smooth slide animation, reset method |
-| **Sliders** | Throttled callbacks, live value display, increment snapping |
-| **Dropdowns** | Searchable, multi-select, fuzzy matching, mobile-keyboard safe |
-| **Inputs** | Text boxes with focus states |
-| **Keybinds** | Click to rebind, collision protection |
-| **Color Pickers** | HSV, RGB, Hex, live preview, preset palettes |
-| **Notifications** | Action buttons, type icons, progress bars |
-| **Tooltips** | Hover + touch support, viewport-clamped |
-| **Context Menus** | Nested options with icons |
-| **Progress Bars** | Indeterminate and value display |
-| **Spinners** | Loop animations, no heartbeat required |
-| **Accordions** | Collapsible content sections |
-| **Bindable Controls** | Toggle + keybind combined |
-| **Graphs** | Live sparklines with auto-sampling |
-| **Carousels** | Content sliders with arrows |
-| **Search & Command Palette** | Live filtering, Ctrl+K palette |
-| **Modals** | Confirmation dialogs |
-| **Key Gate** | Styled key system with attempt tracking |
+## Library-level API
 
-**Snappy interactions** — 0.26s toggles, instant-feeling hover states, and a 4Hz-capped stats chip so the header never costs you frames
-
-**11 built-in themes** — Ember, Ocean, Crimson, Slate, Midnight, Forest, Coral, Quiet + Lava, Cyberpunk, Obsidian, Emerald — Ember, Ocean, Crimson, Slate, Midnight, Forest, Coral, Quiet — plus `Library:RegisterTheme()` for your own.
+| Method | Description |
+|---|---|
+| `RezurXLib:CreateWindow(cfg)` | Returns `Window` |
+| `RezurXLib:Notify(cfg)` | Routes to the last window |
+| `RezurXLib:RegisterTheme(name, palette)` | Adds a theme |
+| `RezurXLib:GetThemeNames()` | Sorted list of registered themes |
+| `RezurXLib:GetTheme(name)` | Deep clone of a palette |
+| `RezurXLib:ModifyTheme(name\|palette)` | Swap theme live across all windows |
+| `RezurXLib:RegisterImage(key, image)` | Friendly local alias for an asset |
+| `RezurXLib:ResolveImage(image)` | Number / URI / alias → asset string |
+| `RezurXLib:SaveConfiguration()` / `:LoadConfiguration(table)` | Serialize/deserialize flagged values |
+| `RezurXLib:GetFlag(flag)` | Read a flagged element's current value |
+| `RezurXLib:HasFlag(flag)` | Boolean check |
+| `RezurXLib:SetReducedMotion(bool)` | Disable all animation globally |
+| `RezurXLib:GetStats()` | `{ Version, WindowCount, FlagCount, Themes }` |
+| `RezurXLib:GetDocs()` | Machine-readable API metadata |
+| `RezurXLib:Destroy()` | Destroy every window + cleanup |
 
 ---
 
-## 🛡️ Reliability & Trust
-- **No telemetry** — zero analytics, zero data collection
-- **No automatic requests** — the only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`)
-- **Error-handled** — every callback wrapped in `pcall`
-- **Memory-safe** — Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner
-- **Headless-tested** — 233 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification)
-- **Executor-compatible** — works in Synapse, Krnl, Script-Ware, Xeno, Delta, and more
-- **100% backward compatible** — existing v3 scripts run unchanged; v4 features are strictly additive
+## Trust & reliability
+
+- **No telemetry.** Zero analytics, zero data collection.
+- **No automatic requests.** The only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`).
+- **No executor bypass globals** except `gethui()` (off in plain Roblox).
+- **Error-handled.** Every callback wrapped in `pcall`. Every motion path degrades gracefully on slow hosts (frame-time guard, 12-spring budget cap, `ReducedMotion` honored).
+- **Memory-safe.** Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner.
+- **Headless-tested.** 236 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification).
+- **Executor-compatible.** Synapse, Krnl, Script-Ware, Xeno, Delta, and more.
+- **100% backward compatible.** Existing v3/v4 scripts run unchanged; v5 features are strictly additive.
 
 ---
 
-## 🚀 Quick Start
+## Repo layout
 
-### In a ModuleScript
-```lua
-local RezurXLib = require(path.to.RezurXLib)
-
-local Window = RezurXLib:CreateWindow({
-    Name = "My Panel",
-    Subtitle = "Built with RezurXLib",
-    Theme = "Ember",
-    Icon = 4483362458,                       -- optional
-    ConfigurationSaving = { Enabled = true, FileName = "MyPanel" },
-})
-
-local Tab = Window:CreateTab("Main", "📊")
-Tab:CreateButton({
-    Name = "Click Me",
-    Callback = function()
-        print("Button clicked!")
-    end
-})
+```
+├── src/                    # source modules (lexicographic concat order)
+│   ├── 00_core.luau        # constants, motion tokens, services
+│   ├── 05_themes.luau      # theme presets + color math
+│   ├── 10_motion.luau      # spring solver
+│   ├── 15_helpers.luau     # builders, gui-host resolution, Library root
+│   ├── 20_window.luau     # Window + every element factory
+│   └── 30_api.luau        # Library-level API + GetDocs
+├── scripts/build_bundle.py # concatenate src/ → RezurXLib.lua
+├── RezurXLib.lua           # the single-file bundle (byte-identical to src/)
+├── Example.client.lua      # worked example
+├── CHANGELOG.md            # full version history
+├── LICENSE                 # MIT
+└── README.md               # this file
 ```
 
-### In an Executor (Synapse, Krnl, Xeno, etc.)
-```lua
-local RezurXLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/AshesOfTheUndead/rezurxlib/main/RezurXLib.lua"))()
-```
-
-### Using the Global Reference
-```lua
-_G.RezurXLib:CreateWindow({ Name = "Admin Panel" })
+To rebuild the bundle after editing source:
+```sh
+python3 scripts/build_bundle.py          # writes RezurXLib.lua
+python3 scripts/build_bundle.py --check  # verify bundle is up to date
 ```
 
 ---
 
-## 📚 Documentation
+## Credits
 
-### `Library:CreateWindow(config)`
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `Name` | `string` | Window title |
-| `Subtitle` | `string` | Subtitle text |
-| `Theme` | `string / table` | Built-in theme name or palette table |
-| `ToggleUIKeybind` | `Enum.KeyCode` | Keybind to toggle visibility (default K) |
-| `LoadingEnabled` | `boolean` | Show loading animation |
-| `LoadingTitle` | `string` | Loading screen wordmark |
-| `Size` | `{X, Y}` | Window size (default: 460x500) |
-| `Icon` | `number / string` | Asset id, rbx URI, or emoji text |
-| `AnimatedAccents` | `boolean` | Ambient pulse loops — logo glow & glow-strip shimmer (opt-in) |
-| `ReducedMotion` | `boolean` | Disable all animation |
-| `KeySystem` / `KeySettings` | — | See above |
-| `ConfigurationSaving` | `table` | See above |
-| `Sounds` | `bool/table` | UI click sounds (v4.4) |
-| `BackdropBlur` | `boolean` | Blurs the whole game world (global), refcounted (v5) |
-| `ShadowImage` | `string` | Optional 9-slice shadow asset (v5) |
-| `Density` | `string` | `"compact"` / `"comfortable"` (v5) |
-| `CustomTheme` | `table` | `{ PrimaryAccent, SecondaryAccent, CardBackground, TextMain, … }` (v5.2) |
-| `Activity` | `string` | `"running"` / `"paused"` beacon (v5.2) |
-| `QuickPause` | `function` | Quick pause/resume callback (v5.2) |
-| `DisplayOrder` | `number` | ScreenGui DisplayOrder (v5) |
+**Creator:** RezurXshin · **Studio:** RezurXLabs · **License:** MIT — see [LICENSE](LICENSE).
 
-**Returns:** `Window` object
-
-### `Window:CreateTab(name, icon)`
-Creates a tab. `icon` may be an emoji string or an asset id/URI.
-
-### `Tab:CreateButton(config)`
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `Name` | `string` | Button label |
-| `Variant` | `string` | `"Primary"` or `"Secondary"` |
-| `Icon` | `number/string` | Optional leading asset icon |
-| `Callback` | `function` | Called when clicked |
-| `Tooltip` | `string` | Optional tooltip text |
-
-**Returns:** `Button` object with `:Set()` method
-
-### `Tab:CreateToggle(config)`
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `Name` | `string` | Toggle label |
-| `CurrentValue` | `boolean` | Initial state |
-| `Callback` | `function` | Called on state change |
-| `Flag` | `string` | Optional flag for config auto-save |
-
-**Returns:** `Toggle` object with `:Set()`, `:Get()`, `:Reset()` methods
-
-See `Library:GetDocs()` in-game for the full machine-readable API reference, and `ExampleUsage.client.lua` for a complete worked example.
-
----
-
-## 📦 Files in This Repository
-| File | Description |
-|------|-------------|
-| `RezurXLib.lua` | The complete UI library (ModuleScript) |
-| `ExampleUsage.client.lua` | Example showing all components in action |
-| `CHANGELOG.md` | Full v4.0 change list with every fix |
-
----
-
-## 🏢 Powered By
-| Project | Description |
-|---------|-------------|
-| **DOMINUS Engine** | Full-featured automation engine using RezurXLib |
-| **RezurXLab Tools** | Various tools and utilities built with RezurXLib |
-
----
-
-## 👑 Credits
-
-**Creator:** RezurXshin
-**Studio:** RezurXLabs
-**License:** MIT — open, free, and transparent.
-
----
-
-## 🙏 Acknowledgments
-
-- Inspired by the **Rayfield UI Library** and its contributions to the Roblox community.
-- Built with ❤️ for developers and players everywhere.
-
----
-
-## 📜 License
-
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
-
----
-
-**RezurXLib — The UI library you can trust.** 🚀
+Inspired by the Rayfield UI Library and its contributions to the Roblox community. Built with ❤️ for developers and players everywhere.

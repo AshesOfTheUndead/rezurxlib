@@ -1,6 +1,27 @@
 -- ============================================================
 function Library:CreateWindow(cfg)
         cfg = cfg or {}
+        -- [v5.3.1] DIAGNOSTIC ENTRY BANNER. The most common consumer-side
+        -- failure is "nothing shows up": previously the library silently
+        -- swallowed errors inside the long CreateWindow body, so the user
+        -- could not tell whether the call was reached, the host detection
+        -- failed, or an internal instance step threw. We now print a
+        -- one-line banner at the very top so the executor's output panel
+        -- shows the call landed; if the window then fails to appear, the
+        -- search space narrows to host detection or render path. Gated
+        -- behind pcall + RunService:IsStudio() off so Studio runs stay
+        -- quiet (the headless suite injects a fake RunService that IS
+        -- Studio, so the suite output stays clean).
+        pcall(function()
+                if RunService and not RunService:IsStudio() then
+                        print(("[RezurXLib] CreateWindow called: name=%q theme=%s host=%s size=%s"):format(
+                                tostring(cfg.Name or cfg.Title or "RezurX UI"),
+                                tostring(cfg.Theme or "Quiet"),
+                                tostring(cfg.Host or "Auto"),
+                                tostring(cfg.Size or "460x500 default")
+                        ))
+                end
+        end)
         -- [v5.2.0] Universal aliases: Title/SubTitle map onto Name/Subtitle so
         -- scripts written against other libraries drop in unchanged.
         local windowName   = cfg.Name or cfg.Title or "RezurX UI"

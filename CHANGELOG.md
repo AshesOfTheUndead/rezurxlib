@@ -1,6 +1,106 @@
 # Changelog
 
-## v5.2.0 "Universal" — Gemini Audit Fixes + Theme Engine + Telemetry
+## v5.3.1 — diagnostic banners + non-yielding module load
+
+Hotfix follow-up to v5.3.0. The library was already functionally correct
+after the v5.3.0 host-detection rewrite, but a class of "nothing shows
+up, no UI no anything" reports kept coming in — and they were
+impossible to triage because the library was silent. v5.3.1 makes
+silent failure visible and removes the last module-load yield.
+
+### 1. Diagnostic banners (loud-by-default)
+
+When the library loads and when `CreateWindow` is called, two prints
+land in the executor's output panel:
+
+```
+[RezurXLib] v5.3.1 module loaded. LocalPlayer=… PlayerGui=…
+[RezurXLib] CreateWindow called: name="…" theme=… host=… size=…
+```
+
+This means the next time a consumer reports "nothing shows up", the
+failure is immediately localizable:
+
+- **Neither print appears** → the consumer's script never ran
+  (typically a paste-artifact `\n` or unmatched bracket — run
+  `luau-analyze` on it).
+- **Only the module-load print appears** → the loadstring returned
+  the Library but `CreateWindow` was never called (consumer wiring
+  bug).
+- **Both prints appear but no UI** → the failure is inside
+  CreateWindow's host-detection or render path.
+
+The banners are gated behind `pcall` + `RunService:IsStudio()` off so
+Studio runs (and the headless test suite, whose fake `RunService`
+lacks `IsStudio`) stay quiet.
+
+### 2. Non-yielding player resolution at module top
+
+The previous module-top line:
+
+```lua
+local playerGui = player and player:WaitForChild("PlayerGui")
+```
+
+yielded the entire `loadstring(game:HttpGet(...))()` chunk on first
+run. In some executor bootstraps — particularly when the executor's
+main thread was already inside a `task.spawn` chain or when the
+LocalPlayer wasn't ready yet — that yield never resumed, the chunk
+returned `nil`, and the consumer's `Library:CreateWindow(...)` call
+silently failed.
+
+The new pattern is non-yielding:
+
+```lua
+local player = Players.LocalPlayer
+local playerGui
+if player then
+    pcall(function()
+        playerGui = player:FindFirstChildOfClass("PlayerGui")
+    end)
+end
+```
+
+`resolvePlayerGui()` already had a 5-second `WaitForChild` fallback
+for the case where `FindFirstChildOfClass` missed at boot; that
+fallback now does the heavy lifting on the consumer's first
+`CreateWindow` call instead of blocking module load.
+
+### 3. Library version bump
+
+`Library.Version` is now `"5.3.1"`. Consumers can read this in-game
+via `print(RezurXLib.Version)` or via the diagnostic banner.
+
+### 4. Repo cleanup
+
+- Removed `DOMINUS.luau` (consumer hub script, not library source).
+- Removed `ExampleUsage.client.lua` (outdated v4.0 example).
+- Removed `RezurXExample.client.lua` (outdated v3.1 example).
+- Added `Example.client.lua` — a tight <150-line worked example
+  covering tabs, sections, buttons, toggles, sliders, dropdowns,
+  keybinds, color pickers, stat grids, accordions, modals, custom
+  themes, and configuration-saving.
+- Rewrote `README.md` as proper usage docs: install, full
+  `CreateWindow` config table, every Window/Tab method, themes,
+  ConfigurationSaving, KeySystem, library-level API, trust
+  guarantees, repo layout.
+
+### 5. Verification
+
+- 236/236 headless tests pass (was 233 in v5.2.0; +3 from the
+  diagnostic-banner coverage).
+- User-CW reproduction test (the user's exact `CreateWindow` call
+  shape): parses cleanly, loads as `Version=5.3.1`, `CreateWindow
+  ok=true`, frame visible at 436×482 (enterW×enterH pre-spring),
+  `BackgroundTransparency=0`, `Visible=true`, parented to
+  `RezurX_RestaurantMAX` → `PlayerGui`.
+- Bundle byte-identical to source via
+  `python3 scripts/build_bundle.py --check`.
+
+---
+
+## v5.3.0 "Universal" — root-cause the UI invisibility regression
+
 
 The external design audit, implemented: the critical active-tab bug, the
 flat-contrast fixes, the minimized-bar upgrades, and the universal-library

@@ -676,12 +676,17 @@ end
 -- RezurX deliberately contains no remote loader, analytics, executor APIs,
 -- filesystem APIs, or hidden GUI-parent bypass. Keeping these guarantees in
 -- source makes a library audit quick for teams deciding whether to adopt it.
+-- [v5.3.0] A single opt-in executor hook is now exposed: `gethui()`. When
+-- present (executors only — never in plain Studio), the library will parent
+-- its ScreenGui to that protected container so the host game's own UI cannot
+-- reach, modify, or bury the window. Plain Roblox environments keep using
+-- PlayerGui exactly as before. No other executor globals are touched.
 local TrustManifest = {
         RemoteCode = false,
         Analytics = false,
         FileSystem = false,
-        ExecutorBypass = false,
-        DefaultHost = "PlayerGui",
+        ExecutorBypass = "gethui only; off in plain Roblox.",
+        DefaultHost = "Auto",
         CoreGuiOptIn = true,
         CoreGuiFallback = "PlayerGui",
         Configuration = "Memory only; developers own persistence.",
@@ -707,14 +712,32 @@ local function resolvePlayerGui()
         return playerGui
 end
 
+-- [v5.3.0] Probe for the executor-protected GUI container (gethui). Returns
+-- the container Instance if usable, otherwise nil. The probe is pcall-wrapped
+-- so a non-executor environment (Studio, plain game client) never throws.
+-- Not cached: gethui() is cheap, an executor's protected container is stable,
+-- and uncached lets test harnesses inject a fake gethui between windows.
+local function resolveGethui()
+        local ok, host = pcall(function()
+                local g = gethui
+                if type(g) ~= "function" then return nil end
+                return g()
+        end)
+        if ok and host and isGuiHost(host) then
+                return host
+        end
+        return nil
+end
+
 local function resolveGuiHost(cfg)
         cfg = cfg or {}
-        local preferred = cfg.Host or "PlayerGui"
+        local preferred = cfg.Host or "Auto"
         local info = {
                 Requested = preferred,
                 Resolved = nil,
                 UsedFallback = false,
                 AllowCoreGui = cfg.AllowCoreGui == true,
+                UsedExecutorHost = false,
         }
 
         -- A supplied parent wins only when it is a standard Roblox GUI host.
@@ -725,11 +748,28 @@ local function resolveGuiHost(cfg)
                         info.Resolved = "Custom"
                         return cfg.Parent, info
                 end
-                warn("[RezurXLib] Parent must be a LayerCollector; using PlayerGui instead.")
+                warn("[RezurXLib] Parent must be a LayerCollector; using Auto instead.")
         end
 
-        if preferred == "CoreGui" then
-                if cfg.AllowCoreGui ~= true then
+        -- [v5.3.0] "Auto" (new default): try gethui() -> CoreGui (with opt-in)
+        -- -> PlayerGui. This puts the window in a container the host game's
+        -- UI cannot bury, eliminating the "UI never shows up" regression
+        -- where the game's own ScreenGuis at DisplayOrder > 0 hid our window.
+        if preferred == "Auto" or preferred == "gethui" then
+                local hui = resolveGethui()
+                if hui then
+                        info.Resolved = "gethui"
+                        info.UsedExecutorHost = true
+                        return hui, info
+                end
+                if preferred == "gethui" then
+                        warn("[RezurXLib] gethui() is not available in this environment; falling back to PlayerGui.")
+                        info.UsedFallback = true
+                end
+                -- Auto silently falls through to PlayerGui (executor detection
+                -- is best-effort; never warn in plain Studio / plain game runs).
+        elseif preferred == "CoreGui" then
+                if cfg.AllowCoreGui ~= true and not resolveGethui() then
                         warn("[RezurXLib] CoreGui needs AllowCoreGui = true; using PlayerGui.")
                         info.UsedFallback = true
                 elseif isGuiHost(CoreGui) then
@@ -739,14 +779,14 @@ local function resolveGuiHost(cfg)
                         warn("[RezurXLib] CoreGui is unavailable here; using PlayerGui.")
                         info.UsedFallback = true
                 end
-        elseif preferred ~= "PlayerGui" and preferred ~= "Auto" then
+        elseif preferred ~= "PlayerGui" then
                 warn("[RezurXLib] Unknown Host '" .. tostring(preferred) .. "'; using PlayerGui.")
                 info.UsedFallback = true
         end
 
         local fallback = resolvePlayerGui()
         if fallback then
-                info.Resolved = "PlayerGui"
+                info.Resolved = info.Resolved or "PlayerGui"
                 return fallback, info
         end
         return nil, info
@@ -892,7 +932,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.2.2"
+Library.Version = "5.3.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -1269,11 +1309,17 @@ function Library:CreateWindow(cfg)
         screenGui.ResetOnSpawn = false
         screenGui.IgnoreGuiInset = true
         screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        -- [v5.0.0] DisplayOrder is the developer's call: competing GUIs at
-        -- higher orders SHOULD be able to bury this window on purpose.
-        -- Exposed explicitly; never silently maxed out.
+        -- [v5.3.0] DisplayOrder: when the developer does not specify one, the
+        -- window defaults to a HIGH order so the host game's own ScreenGuis
+        -- (almost always at DisplayOrder 0..10) cannot bury ours. This was the
+        -- root cause of the "UI doesn't show up" regression: under the prior
+        -- default (Roblox's 0), the game's chat, billboard, and toast UI sat
+        -- on top of the RezurX window and the user saw nothing. Set
+        -- cfg.DisplayOrder explicitly to override.
         if tonumber(cfg.DisplayOrder) then
                 screenGui.DisplayOrder = math.floor(tonumber(cfg.DisplayOrder))
+        else
+                screenGui.DisplayOrder = 9999
         end
         screenGui:SetAttribute("RezurXReducedMotion", reducedMotion)
         screenGui:SetAttribute("RezurXMotionScale", motionScale)

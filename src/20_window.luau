@@ -369,11 +369,17 @@ function Library:CreateWindow(cfg)
         screenGui.ResetOnSpawn = false
         screenGui.IgnoreGuiInset = true
         screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-        -- [v5.0.0] DisplayOrder is the developer's call: competing GUIs at
-        -- higher orders SHOULD be able to bury this window on purpose.
-        -- Exposed explicitly; never silently maxed out.
+        -- [v5.3.0] DisplayOrder: when the developer does not specify one, the
+        -- window defaults to a HIGH order so the host game's own ScreenGuis
+        -- (almost always at DisplayOrder 0..10) cannot bury ours. This was the
+        -- root cause of the "UI doesn't show up" regression: under the prior
+        -- default (Roblox's 0), the game's chat, billboard, and toast UI sat
+        -- on top of the RezurX window and the user saw nothing. Set
+        -- cfg.DisplayOrder explicitly to override.
         if tonumber(cfg.DisplayOrder) then
                 screenGui.DisplayOrder = math.floor(tonumber(cfg.DisplayOrder))
+        else
+                screenGui.DisplayOrder = 9999
         end
         screenGui:SetAttribute("RezurXReducedMotion", reducedMotion)
         screenGui:SetAttribute("RezurXMotionScale", motionScale)

@@ -5565,6 +5565,11 @@ function Library:CreateWindow(cfg)
                 --   g:UpdateChip("fps", "59")
                 -- Chips may carry Sample = function() return "…" end for
                 -- automatic polling at UpdateRate.
+                -- [v5.3.2] Declarative chips: gcfg.Chips = { {Id, Label, Value, Icon, Sample}, … }
+                -- lets the developer define the entire grid in one call. Matches
+                -- the pattern of CreateDropdown's Options array (a single table
+                -- of pre-built children) — consumer scripts that pass Chips now
+                -- Just Work instead of getting an empty grid.
                 -- ========================================================
                 function tab:AddStatGrid(gcfg)
                         gcfg = gcfg or {}
@@ -5701,6 +5706,17 @@ function Library:CreateWindow(cfg)
 
                         registerFlag(gcfg.Flag, gridObj)
                         applyTooltip(holder, gcfg.Tooltip)
+
+                        -- [v5.3.2] Declarative chips: if gcfg.Chips is a list,
+                        -- instantiate them now (after the methods are defined
+                        -- so AddChip's dependencies are bound). Order preserved.
+                        if type(gcfg.Chips) == "table" then
+                                for _, chip in ipairs(gcfg.Chips) do
+                                        if type(chip) == "table" then
+                                                pcall(function() gridObj:AddChip(chip) end)
+                                        end
+                                end
+                        end
 
                         -- Auto-poll any Sample functions at UpdateRate.
                         if updateRate then

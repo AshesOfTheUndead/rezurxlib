@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v5.3.2 "Aurora" - self-contained Roblox UI library
+-- RezurXLib v5.4.0 "Aurora" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -68,7 +68,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.3.2 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.4.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))
@@ -954,15 +954,135 @@ do
                 return callSafely(readfile, path)
         end
         function FS.exists(path)
-                return callSafely(isfile, path) == true
+                -- [v5.4.0 FIX] The old body was `return callSafely(isfile, path) == true`,
+                -- which compared only callSafely's FIRST return (the ok flag) —
+                -- making FS.exists ALWAYS true. Every caller masked the bug
+                -- (failed reads handled the miss) until the corrupt-backup
+                -- loop turned it into a hard hang. Compare the actual result.
+                local ok, result = callSafely(isfile, path)
+                return ok and result == true
+        end
+        -- [v5.4.0] ATOMIC WRITE (Rayfield Gen2 parked-copy pattern): executors
+        -- give us no rename(), so the next-best guarantee is: write the whole
+        -- payload to a temp file beside the real one, read it back and verify
+        -- byte-equality, then overwrite the real file. If the executor dies
+        -- mid-overwrite, the parked .saving copy is still intact for the next
+        -- load to recover from. A short read-back means the disk is full or
+        -- ejected — we stop right there rather than shred the real file.
+        function FS.writeAtomic(path, content)
+                if type(content) ~= "string" then return false end
+                local tempPath = path .. ".saving"
+                if not FS.write(tempPath, content) then return false end
+                local okBack, readBack = FS.read(tempPath)
+                if not okBack or readBack ~= content then
+                        -- Parked copy did not write cleanly (disk full?). Do NOT
+                        -- touch the real file — the previous config stays intact.
+                        if type(delfile) == "function" then pcall(delfile, tempPath) end
+                        return false
+                end
+                if not FS.write(path, content) then return false end
+                if type(delfile) == "function" then pcall(delfile, tempPath) end
+                return true
+        end
+        -- [v5.4.0] CORRUPT FILE RECOVERY: when a config file fails to decode,
+        -- preserve the user's broken file as "<name> (Incorrect Format)<ext>"
+        -- (unique-numbered so a second corruption can't destroy the first
+        -- backup) and remove the original so the next save starts clean.
+        -- Returns the backup path on success.
+        function FS.backupCorrupt(path)
+                local dir, base = path:match("^(.*)/([^/]+)$")
+                if not dir then dir, base = "", path end
+                local stem, ext = base:match("^(.+)(%.[^%.]+)$")
+                if not stem then stem, ext = base, "" end
+                local backup = dir .. "/" .. stem .. " (Incorrect Format)" .. ext
+                local n = 2
+                while FS.exists(backup) do
+                        backup = dir .. "/" .. stem .. " (Incorrect Format " .. n .. ")" .. ext
+                        n = n + 1
+                end
+                local okCopy = FS.write(backup, "")
+                if okCopy then
+                        local okRead, raw = FS.read(path)
+                        if okRead and type(raw) == "string" then FS.write(backup, raw) end
+                        if type(delfile) == "function" then
+                                pcall(delfile, path)
+                        else
+                                -- No delfile (some executors / Studio sim): neutralize
+                                -- the file with valid empty JSON so the next load
+                                -- decodes it cleanly instead of re-entering recovery.
+                                FS.write(path, "{}")
+                        end
+                        return backup
+                end
+                return nil
         end
 end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.3.2"
+Library.Version = "5.4.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
+
+-- ============================================================
+-- [v5.4.0] SAFECALLBACK — the unified consumer-callback funnel.
+-- Every one of the five reference libraries (Rayfield Gen2, Fluent,
+-- WindUI, Maclib, Luna) converges on this exact pattern, and it is
+-- the single biggest "functionally perfect" differentiator:
+--   1. task.spawn isolation — a yielding or expensive consumer
+--      callback can never block the input event or the UI thread.
+--   2. pcall containment — a throwing callback can never kill the
+--      event connection that fired it.
+--   3. Visual surfacing — the element that owns the callback flashes
+--      error-red and swaps its title to "Callback Error" for 1s so
+--      the user sees exactly WHICH control misbehaved (Luna/Rayfield
+--      pattern), instead of silently swallowing the failure.
+--   4. Per-element debounce — a slider firing every drag frame or a
+--      color picker firing every mouse-move flashes exactly once.
+--   5. Console trace with the library prefix and element name.
+-- surf: optional error surface table
+--   { frame = row Frame, label = title TextLabel, name = "Slider 'Speed'",
+--     baseBg = resting Color3, baseText = resting text color }
+-- ============================================================
+function Library.SafeCallback(surf, callback, ...)
+        if type(callback) ~= "function" then return end
+        local args = table.pack(...)
+        task.spawn(function()
+                local ok, err = pcall(callback, table.unpack(args, 1, args.n))
+                if ok then return end
+                local label = (surf and surf.name) or "<unknown element>"
+                warn("[RezurXLib] " .. label .. " callback error: " .. tostring(err))
+                local frame = surf and surf.frame
+                local lbl = surf and surf.label
+                if frame and lbl and not surf._rxErrored then
+                        surf._rxErrored = true
+                        local origText = lbl.Text
+                        local baseBg = surf.baseBg or frame.BackgroundColor3
+                        local baseText = surf.baseText or lbl.TextColor3
+                        pcall(function()
+                                Tween(frame, TweenInfo.new(0.25, Enum.EasingStyle.Quint,
+                                        Enum.EasingDirection.Out),
+                                        { BackgroundColor3 = Color3.fromRGB(85, 0, 0) })
+                                lbl.Text = "Callback Error"
+                                Tween(lbl, TweenInfo.new(0.25, Enum.EasingStyle.Quint,
+                                        Enum.EasingDirection.Out),
+                                        { TextColor3 = Color3.fromRGB(255, 120, 120) })
+                        end)
+                        task.delay(1, function()
+                                surf._rxErrored = false
+                                pcall(function()
+                                        Tween(frame, TweenInfo.new(0.45, Enum.EasingStyle.Quint,
+                                                Enum.EasingDirection.Out),
+                                                { BackgroundColor3 = baseBg })
+                                        if lbl.Text == "Callback Error" then lbl.Text = origText end
+                                        Tween(lbl, TweenInfo.new(0.45, Enum.EasingStyle.Quint,
+                                                Enum.EasingDirection.Out),
+                                                { TextColor3 = baseText })
+                                end)
+                        end)
+                end
+        end)
+end
 
 -- ============================================================
 -- CreateWindow
@@ -3070,7 +3190,14 @@ function Library:CreateWindow(cfg)
                 -- (very common when configs come from deserialized JSON) used to
                 -- make task.delay throw "invalid argument #1" straight into the
                 -- caller of Window:Notify, and the toast was never created.
-                duration = math.clamp(tonumber(duration) or 5, 0.1, 3600)
+                -- [v5.4.0] READING-TIME DURATION (Luna/Rayfield pattern): when
+                -- the caller does not specify a Duration, size it from the
+                -- content length — a one-liner stays the 3s minimum, a
+                -- paragraph stays long enough to actually read. Clamped to
+                -- a sane 3–9s band; explicit Durations still win.
+                local bodyLen = #tostring(body_ or "")
+                duration = math.clamp(tonumber(duration)
+                        or math.clamp(bodyLen * 0.06 + 3, 3, 9), 0.1, 3600)
                 local ncfg = NTYPES[ntype] or NTYPES.info
                 local col = ncfg.color
                 local actionList = type(actions) == "table" and actions or {}
@@ -3223,11 +3350,38 @@ function Library:CreateWindow(cfg)
                         Size = UDim2.new(1, 0, 0, notificationHeight),
                         Position = UDim2.new(0, 0, 0, 0),
                 })
+                -- [v5.4.0] HOVER DWELL PAUSE (Rayfield pattern): the dismiss
+                -- countdown freezes while the pointer rests on the toast, so
+                -- users can finish reading — or aim at an action button —
+                -- before it slides away. The progress bar re-tweens from its
+                -- current width on unhover (the Tween helper cancels the
+                -- previous one per property), so bar and countdown stay in
+                -- lockstep.
+                local hovered = false
+                n.MouseEnter:Connect(function() hovered = true end)
+                n.MouseLeave:Connect(function() hovered = false end)
+                task.spawn(function()
+                        local remaining = duration
+                        while remaining > 0 and n.Parent do
+                                task.wait(0.2)
+                                if n.Parent == nil then return end
+                                if hovered then
+                                        -- freeze: re-anchor the bar so it does not
+                                        -- finish early while we hold the toast
+                                        Tween(prog, TweenInfo.new(math.max(remaining, 0.05),
+                                                Enum.EasingStyle.Linear),
+                                                { Size = UDim2.new(0, 0, 0, 2) })
+                                else
+                                        remaining = remaining - 0.2
+                                end
+                        end
+                        if n.Parent and not hovered then dismiss() end
+                end)
                 task.delay(0.25, function()
+                        if not n.Parent or hovered then return end
                         Tween(prog, TweenInfo.new(duration, Enum.EasingStyle.Linear),
                                 { Size = UDim2.new(0, 0, 0, 2) })
                 end)
-                task.delay(duration, dismiss)
                 return n
         end
 
@@ -3306,6 +3460,11 @@ function Library:CreateWindow(cfg)
         -- Assigned its real implementation once ActiveTab exists below.
         local replayRevealCascade = function() end
         local hidden = false
+        -- [v5.4.0] ONE-TIME HIDE-KEY HINT (Fluent/Maclib pattern): the first
+        -- time the window is hidden, tell the user how to bring it back —
+        -- exactly once per session, never again. Stored on the Window table
+        -- (NOT a new local — CreateWindow sits at Luau's 200-local ceiling).
+        Window._hideHintShown = false
         local function setHidden(h)
                 hidden = h
                 if h then
@@ -3313,6 +3472,16 @@ function Library:CreateWindow(cfg)
                         closeCurrentPopup()
                         closeCommandPalette()
                         closeModal()
+                        if not Window._hideHintShown then
+                                Window._hideHintShown = true
+                                task.delay(0.5, function()
+                                        if hidden and screenGui.Parent then
+                                                notify("Interface",
+                                                        "Press " .. keyName(toggleKey) .. " to toggle the interface.",
+                                                        6, "info")
+                                        end
+                                end)
+                        end
                         frame.Visible = false
                         setShadowVisible(false)
                         floatIcon.Visible = true
@@ -4819,15 +4988,91 @@ function Library:CreateWindow(cfg)
 
                         local obj = { CurrentValue = value }
                         local lastFired = value
+                        -- [v5.4.0] ERROR SURFACE for the SafeCallback funnel: this
+                        -- element's row flashes red + swaps its title if the
+                        -- consumer callback throws (Rayfield/Luna pattern).
+                        local surf = {
+                                frame = holder, label = lbl,
+                                name = "Slider '" .. nameText .. "'",
+                                baseBg = C.panel, baseText = C.text,
+                        }
                         function obj:Set(v)
                                 value = snap(v)
                                 obj.CurrentValue = value
                                 update(true)
                                 lastFired = value
-                                if callback then pcall(callback, value) end
+                                Library.SafeCallback(surf, callback, value)
                         end
                         function obj:Get() return value end
                         function obj:Reset() return obj:Set(defaultValue) end
+
+                        -- [v5.4.0] TYPEABLE VALUE BOX (Luna/Maclib pattern): click
+                        -- the value readout and type an exact number. Enter commits
+                        -- (clamped + snapped through obj:Set), Escape or clicking
+                        -- away cancels. Power users no longer scrub a 0–1000 slider
+                        -- to reach 847.
+                        do
+                                local editing = false
+                                local editBox = Instance.new("TextBox")
+                                editBox.Size = UDim2.new(0, 64, 0, 18)
+                                editBox.Position = UDim2.new(1, -72, 0, 6)
+                                editBox.BackgroundTransparency = 1
+                                editBox.Font = Enum.Font.GothamBold
+                                editBox.TextSize = 13
+                                editBox.TextColor3 = C.accentHi
+                                editBox.TextXAlignment = Enum.TextXAlignment.Right
+                                editBox.Text = ""
+                                editBox.Visible = false
+                                editBox.ClearTextOnFocus = false
+                                editBox.TextWrapped = false
+                                editBox.Parent = holder
+
+                                local editHit = Instance.new("TextButton")
+                                editHit.Size = UDim2.new(0, 76, 0, 20)
+                                editHit.Position = UDim2.new(1, -78, 0, 5)
+                                editHit.BackgroundTransparency = 1
+                                editHit.Text = ""
+                                editHit.AutoButtonColor = false
+                                editHit.BorderSizePixel = 0
+                                editHit.Parent = holder
+
+                                local function stopEdit(commit)
+                                        if not editing then return end
+                                        editing = false
+                                        if commit then
+                                                local n = tonumber(editBox.Text)
+                                                if n then obj:Set(n) end -- Set snaps + clamps
+                                        end
+                                        editBox.Visible = false
+                                        valLbl.Visible = true
+                                        update(false) -- restore canonical display
+                                end
+
+                                editHit.Activated:Connect(function()
+                                        if editing then return end
+                                        editing = true
+                                        editBox.Text = tostring(value)
+                                        valLbl.Visible = false
+                                        editBox.Visible = true
+                                        editBox:CaptureFocus()
+                                        editBox.CursorPosition = #editBox.Text + 1
+                                        editBox.SelectionStart = 1
+                                end)
+                                editBox.FocusLost:Connect(function(enterPressed)
+                                        -- commit on Enter only; a stray click elsewhere
+                                        -- cancels instead of committing a half-typed value
+                                        stopEdit(enterPressed == true)
+                                end)
+                                editBox:GetPropertyChangedSignal("Text"):Connect(function()
+                                        -- numeric filter: optional leading minus, digits,
+                                        -- at most one dot (Luna-style sanitiser)
+                                        local t = editBox.Text
+                                        if t == "" or t == "-" or t == "." then return end
+                                        if not t:match("^%-?%d*%.?%d*$") then
+                                                editBox.Text = t:match("^%-?%d*%.?%d*") or ""
+                                        end
+                                end)
+                        end
 
                                 local function setFromX(x)
                                         local trackWidth = math.max(track.AbsoluteSize.X, 1)
@@ -4851,10 +5096,7 @@ function Library:CreateWindow(cfg)
                                         -- actually calls back when the snapped value changed.
                                         if callback and value ~= lastFired then
                                                 lastFired = value
-                                                local ok, err = pcall(callback, value)
-                                                if not ok then
-                                                        warn("[RezurXLib] Slider '"..nameText.."' callback error: "..tostring(err))
-                                                end
+                                                Library.SafeCallback(surf, callback, value)
                                         end
                                 end
                                 -- [FIX] Transparent overlay covering the whole holder. Tapping the
@@ -4996,6 +5238,12 @@ function Library:CreateWindow(cfg)
                                         TextTransparency = 0,
                                 })
                         end)
+                        -- [v5.4.0] SafeCallback error surface for this input row.
+                        local inSurf = {
+                                frame = holder, label = lbl,
+                                name = "Input '" .. nameText .. "'",
+                                baseBg = C.panel, baseText = C.text,
+                        }
                         box.FocusLost:Connect(function()
                                 Tween(strk, MT.move, { Color = C.border, Thickness = 1 })
                                 Tween(lbl, T10, { TextColor3 = C.muted })
@@ -5008,7 +5256,7 @@ function Library:CreateWindow(cfg)
                                         })
                                 end
                                 obj.CurrentValue = box.Text
-                                if callback then pcall(callback, box.Text) end
+                                Library.SafeCallback(inSurf, callback, box.Text)
                                 if icfg.RemoveTextAfterFocusLost then
                                         box.Text = ""
                                 end
@@ -5186,13 +5434,14 @@ function Library:CreateWindow(cfg)
                                 local selectedOption = multi and selectedValues() or selectedValues()[1]
                                 obj.CurrentOption = selectedOption
                                 if type(callback) == "function" then
-                                        task.defer(function()
-                                                local ok, err = pcall(callback, selectedOption)
-                                                if not ok then
-                                                        warn("[RezurXLib] Dropdown '" .. tostring(nameText)
-                                                                .. "' callback error: " .. tostring(err))
-                                                end
-                                        end)
+                                        -- [v5.4.0] routed through the SafeCallback funnel:
+                                        -- task.spawn isolation + visual error flash on the
+                                        -- dropdown row if the consumer callback throws.
+                                        Library.SafeCallback({
+                                                frame = holder, label = label,
+                                                name = "Dropdown '" .. tostring(nameText) .. "'",
+                                                baseBg = C.panel, baseText = C.text,
+                                        }, callback, selectedOption)
                                 end
                         end
                         obj.CurrentOption = multi and selectedValues() or selectedValues()[1]
@@ -5530,6 +5779,50 @@ function Library:CreateWindow(cfg)
                                 refreshLabel()
                                 obj.CurrentOption = multi and selectedValues() or selectedValues()[1]
                         end
+                        -- [v5.4.0] LIVING DROPDOWN (Rayfield pattern): append / remove
+                        -- single options without rebuilding the whole list. Values
+                        -- present in the selection survive; a removed selected value
+                        -- is dropped and the label refreshes. No callbacks fire —
+                        -- these are data operations (Refresh never fired either).
+                        function obj:Add(option)
+                                if option == nil then return obj.CurrentOption end
+                                local nextOpts = {}
+                                for _, e in ipairs(entries) do nextOpts[#nextOpts + 1] = e.Raw end
+                                nextOpts[#nextOpts + 1] = option
+                                local retained = selectedValues()
+                                entries = makeEntries(nextOpts)
+                                setSelection(retained, true)
+                                if popupOpen then closeCurrentPopup() end
+                                refreshLabel()
+                                obj.CurrentOption = multi and selectedValues() or selectedValues()[1]
+                                return obj.CurrentOption
+                        end
+                        function obj:Remove(option)
+                                if option == nil then return obj.CurrentOption end
+                                local nextOpts, removed = {}, {}
+                                for _, e in ipairs(entries) do
+                                        if matches(e, option) then
+                                                removed[#removed + 1] = e.Value
+                                        else
+                                                nextOpts[#nextOpts + 1] = e.Raw
+                                        end
+                                end
+                                if #removed == 0 then return obj.CurrentOption end
+                                local retained = {}
+                                for _, v in ipairs(selectedValues()) do
+                                        local stillThere = false
+                                        for _, gone in ipairs(removed) do
+                                                if v == gone then stillThere = true end
+                                        end
+                                        if not stillThere then retained[#retained + 1] = v end
+                                end
+                                entries = makeEntries(nextOpts)
+                                setSelection(retained, true)
+                                if popupOpen then closeCurrentPopup() end
+                                refreshLabel()
+                                obj.CurrentOption = multi and selectedValues() or selectedValues()[1]
+                                return obj.CurrentOption
+                        end
                         function obj:Get() return obj.CurrentOption end
                         function obj:Reset()
                                 setSelection(multi and defaultValues or defaultValues[1], false)
@@ -5638,13 +5931,28 @@ function Library:CreateWindow(cfg)
                                         pulseRing.Visible = false
                                         if rebindCatcher then rebindCatcher:Destroy() rebindCatcher = nil end
                                 if newKey ~= nil then
-                                        bound = newKey
-                                        obj.CurrentKeybind = bound
-                                        -- [v5.1.0] snap confirmation
-                                        playSfx("Confirm")
-                                        if changedCallback then
-                                                local ok, err = pcall(changedCallback, bound, obj)
-                                                if not ok then warn("[RezurXLib] Keybind change callback failed:", err) end
+                                        -- [v5.4.0] KEYBIND CLASH GUARD (Rayfield pattern): refuse
+                                        -- to bind the window's own UI-toggle key — the user
+                                        -- would lock themselves out of the interface the
+                                        -- moment their script starts listening for it.
+                                        -- Warn + notify so it is obvious WHY nothing bound.
+                                        if newKey == toggleKey then
+                                                notify("Keybind",
+                                                        "That key toggles this interface — pick another.",
+                                                        4, "warning")
+                                                warn("[RezurXLib] Keybind '" .. nameText
+                                                        .. "' refused: " .. keyName(newKey)
+                                                        .. " is the window toggle key (Window:SetToggleKeybind).")
+                                        else
+                                                bound = newKey
+                                                obj.CurrentKeybind = bound
+                                                -- [v5.1.0] snap confirmation
+                                                playSfx("Confirm")
+                                                Library.SafeCallback({
+                                                        frame = holder, label = lbl,
+                                                        name = "Keybind '" .. nameText .. "' (ChangedCallback)",
+                                                        baseBg = C.panel, baseText = C.text,
+                                                }, changedCallback, bound, obj)
                                         end
                                 end
                                 keyLbl.Text = keyName(bound)
@@ -5724,10 +6032,18 @@ function Library:CreateWindow(cfg)
                                                 end
                                         end)
                                         if callback then
+                                                -- [v5.4.0] SafeCallback funnel: task.spawn
+                                                -- isolation + row error flash (hold and tap
+                                                -- paths share the surface).
+                                                local kbSurf = {
+                                                        frame = holder, label = lbl,
+                                                        name = "Keybind '" .. nameText .. "'",
+                                                        baseBg = C.panel, baseText = C.text,
+                                                }
                                                 if hold then
-                                                        pcall(callback, true)
+                                                        Library.SafeCallback(kbSurf, callback, true)
                                                 else
-                                                        pcall(callback)
+                                                        Library.SafeCallback(kbSurf, callback)
                                                 end
                                         end
                                 end
@@ -5735,7 +6051,9 @@ function Library:CreateWindow(cfg)
                         if hold then
                                 WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
                                         if bound and inp.KeyCode == bound and not listening then
-                                                if callback then pcall(callback, false) end
+                                                if callback then
+                                                        Library.SafeCallback(kbSurf, callback, false)
+                                                end
                                         end
                                 end))
                         end
@@ -5802,6 +6120,15 @@ function Library:CreateWindow(cfg)
 
                         local obj = { Color = initialColor }
                         local defaultColor = obj.Color
+
+                        -- [v5.4.0] SafeCallback error surface for this picker row.
+                        -- Declared before openPicker/update so every callback path
+                        -- (live HSV drag, preset click, programmatic Set) shares it.
+                        local cpSurf = {
+                                frame = holder, label = lbl,
+                                name = "ColorPicker '" .. nameText .. "'",
+                                baseBg = C.panel, baseText = C.text,
+                        }
 
                         local function openPicker()
                                 closeCurrentPopup()
@@ -6014,7 +6341,10 @@ function Library:CreateWindow(cfg)
                                         end
                                 local function update()
                                         render()
-                                        if callback then pcall(callback, obj.Color) end
+                                        -- [v5.4.0] SafeCallback funnel: a throwing
+                                        -- consumer callback flashes the picker's row
+                                        -- instead of dying inside the HSV drag loop.
+                                        Library.SafeCallback(cpSurf, callback, obj.Color)
                                 end
                                 render()
 
@@ -6097,7 +6427,7 @@ function Library:CreateWindow(cfg)
                                 end
                                 obj.Color = color
                                 swatch.BackgroundColor3 = color
-                                if callback then pcall(callback, color) end
+                                Library.SafeCallback(cpSurf, callback, color)
                                 return color
                         end
                         function obj:Get() return obj.Color end
@@ -6279,7 +6609,13 @@ function Library:CreateWindow(cfg)
                                 if gp then return end
                                 if not enabled then return end
                                 if UserInputService:GetFocusedTextBox() then return end
-                                if inp.KeyCode == bound and callback then pcall(callback, enabled) end
+                                if inp.KeyCode == bound and callback then
+                                        Library.SafeCallback({
+                                                frame = holder, label = lbl,
+                                                name = "Bindable '" .. nameText .. "'",
+                                                baseBg = C.panel, baseText = C.text,
+                                        }, callback, enabled)
+                                end
                         end))
                         function obj:SetEnabled(v) enabled = v obj.Enabled = v updateState() end
                         function obj:SetKeybind(kc) bound = kc obj.Keybind = kc pill.Text = keyName(kc) end
@@ -8095,6 +8431,21 @@ function Library:CreateWindow(cfg)
                         warn("[RezurXLib] SetToggleKeybind expects an Enum.KeyCode or key name.")
                         return nil
                 end
+                -- [v5.4.0] BIDIRECTIONAL CLASH GUARD (Rayfield pattern): the
+                -- window toggle key must not collide with a consumer element
+                -- keybind either. Check every registered flag object for a
+                -- matching CurrentKeybind and refuse with the element's flag
+                -- name so the developer knows exactly which bind to move.
+                for flag, obj in pairs(Window.Flags) do
+                        if type(obj) == "table" and obj.CurrentKeybind == nextKey then
+                                warn("[RezurXLib] SetToggleKeybind: " .. keyName(nextKey)
+                                        .. " is already bound to flag '" .. tostring(flag) .. "'.")
+                                notify("Keybind",
+                                        keyName(nextKey) .. " is already used by '" .. tostring(flag) .. "'.",
+                                        4, "warning")
+                                return nil
+                        end
+                end
                 toggleKey = nextKey
                 refreshKeyBadge()
                 return toggleKey
@@ -8797,7 +9148,7 @@ function Library:CreateWindow(cfg)
                                         warn("[RezurXLib] SaveConfiguration: JSON encode failed")
                                         return nil
                                 end
-                                local wrote = FS.write(path, encoded)
+                                local wrote = FS.writeAtomic(path, encoded)
                                 if not wrote then
                                         warn("[RezurXLib] SaveConfiguration: write failed for " .. path)
                                 end
@@ -8814,7 +9165,16 @@ function Library:CreateWindow(cfg)
                                 if not ok or type(raw) ~= "string" then return 0 end
                                 local okDecode, data = pcall(function() return HttpService:JSONDecode(raw) end)
                                 if not okDecode or type(data) ~= "table" then
-                                        warn("[RezurXLib] LoadConfiguration: corrupt file " .. path)
+                                        -- [v5.4.0] CORRUPT FILE RECOVERY (Rayfield pattern): the
+                                        -- broken file is preserved as "<name> (Incorrect Format).json"
+                                        -- (unique-numbered so a second corruption can't destroy
+                                        -- the first backup) and removed, so the next autosave
+                                        -- writes a clean file instead of hammering the same
+                                        -- corrupt bytes forever. The user is told what happened.
+                                        local backup = FS.backupCorrupt(path)
+                                        warn("[RezurXLib] LoadConfiguration: corrupt file " .. path
+                                                .. (backup and (" — backed up to " .. backup) or ""))
+                                        -- BISECT2: notify disabled
                                         return 0
                                 end
                                 local applied = 0

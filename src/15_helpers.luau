@@ -294,15 +294,135 @@ do
                 return callSafely(readfile, path)
         end
         function FS.exists(path)
-                return callSafely(isfile, path) == true
+                -- [v5.4.0 FIX] The old body was `return callSafely(isfile, path) == true`,
+                -- which compared only callSafely's FIRST return (the ok flag) —
+                -- making FS.exists ALWAYS true. Every caller masked the bug
+                -- (failed reads handled the miss) until the corrupt-backup
+                -- loop turned it into a hard hang. Compare the actual result.
+                local ok, result = callSafely(isfile, path)
+                return ok and result == true
+        end
+        -- [v5.4.0] ATOMIC WRITE (Rayfield Gen2 parked-copy pattern): executors
+        -- give us no rename(), so the next-best guarantee is: write the whole
+        -- payload to a temp file beside the real one, read it back and verify
+        -- byte-equality, then overwrite the real file. If the executor dies
+        -- mid-overwrite, the parked .saving copy is still intact for the next
+        -- load to recover from. A short read-back means the disk is full or
+        -- ejected — we stop right there rather than shred the real file.
+        function FS.writeAtomic(path, content)
+                if type(content) ~= "string" then return false end
+                local tempPath = path .. ".saving"
+                if not FS.write(tempPath, content) then return false end
+                local okBack, readBack = FS.read(tempPath)
+                if not okBack or readBack ~= content then
+                        -- Parked copy did not write cleanly (disk full?). Do NOT
+                        -- touch the real file — the previous config stays intact.
+                        if type(delfile) == "function" then pcall(delfile, tempPath) end
+                        return false
+                end
+                if not FS.write(path, content) then return false end
+                if type(delfile) == "function" then pcall(delfile, tempPath) end
+                return true
+        end
+        -- [v5.4.0] CORRUPT FILE RECOVERY: when a config file fails to decode,
+        -- preserve the user's broken file as "<name> (Incorrect Format)<ext>"
+        -- (unique-numbered so a second corruption can't destroy the first
+        -- backup) and remove the original so the next save starts clean.
+        -- Returns the backup path on success.
+        function FS.backupCorrupt(path)
+                local dir, base = path:match("^(.*)/([^/]+)$")
+                if not dir then dir, base = "", path end
+                local stem, ext = base:match("^(.+)(%.[^%.]+)$")
+                if not stem then stem, ext = base, "" end
+                local backup = dir .. "/" .. stem .. " (Incorrect Format)" .. ext
+                local n = 2
+                while FS.exists(backup) do
+                        backup = dir .. "/" .. stem .. " (Incorrect Format " .. n .. ")" .. ext
+                        n = n + 1
+                end
+                local okCopy = FS.write(backup, "")
+                if okCopy then
+                        local okRead, raw = FS.read(path)
+                        if okRead and type(raw) == "string" then FS.write(backup, raw) end
+                        if type(delfile) == "function" then
+                                pcall(delfile, path)
+                        else
+                                -- No delfile (some executors / Studio sim): neutralize
+                                -- the file with valid empty JSON so the next load
+                                -- decodes it cleanly instead of re-entering recovery.
+                                FS.write(path, "{}")
+                        end
+                        return backup
+                end
+                return nil
         end
 end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.3.2"
+Library.Version = "5.4.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
+
+-- ============================================================
+-- [v5.4.0] SAFECALLBACK — the unified consumer-callback funnel.
+-- Every one of the five reference libraries (Rayfield Gen2, Fluent,
+-- WindUI, Maclib, Luna) converges on this exact pattern, and it is
+-- the single biggest "functionally perfect" differentiator:
+--   1. task.spawn isolation — a yielding or expensive consumer
+--      callback can never block the input event or the UI thread.
+--   2. pcall containment — a throwing callback can never kill the
+--      event connection that fired it.
+--   3. Visual surfacing — the element that owns the callback flashes
+--      error-red and swaps its title to "Callback Error" for 1s so
+--      the user sees exactly WHICH control misbehaved (Luna/Rayfield
+--      pattern), instead of silently swallowing the failure.
+--   4. Per-element debounce — a slider firing every drag frame or a
+--      color picker firing every mouse-move flashes exactly once.
+--   5. Console trace with the library prefix and element name.
+-- surf: optional error surface table
+--   { frame = row Frame, label = title TextLabel, name = "Slider 'Speed'",
+--     baseBg = resting Color3, baseText = resting text color }
+-- ============================================================
+function Library.SafeCallback(surf, callback, ...)
+        if type(callback) ~= "function" then return end
+        local args = table.pack(...)
+        task.spawn(function()
+                local ok, err = pcall(callback, table.unpack(args, 1, args.n))
+                if ok then return end
+                local label = (surf and surf.name) or "<unknown element>"
+                warn("[RezurXLib] " .. label .. " callback error: " .. tostring(err))
+                local frame = surf and surf.frame
+                local lbl = surf and surf.label
+                if frame and lbl and not surf._rxErrored then
+                        surf._rxErrored = true
+                        local origText = lbl.Text
+                        local baseBg = surf.baseBg or frame.BackgroundColor3
+                        local baseText = surf.baseText or lbl.TextColor3
+                        pcall(function()
+                                Tween(frame, TweenInfo.new(0.25, Enum.EasingStyle.Quint,
+                                        Enum.EasingDirection.Out),
+                                        { BackgroundColor3 = Color3.fromRGB(85, 0, 0) })
+                                lbl.Text = "Callback Error"
+                                Tween(lbl, TweenInfo.new(0.25, Enum.EasingStyle.Quint,
+                                        Enum.EasingDirection.Out),
+                                        { TextColor3 = Color3.fromRGB(255, 120, 120) })
+                        end)
+                        task.delay(1, function()
+                                surf._rxErrored = false
+                                pcall(function()
+                                        Tween(frame, TweenInfo.new(0.45, Enum.EasingStyle.Quint,
+                                                Enum.EasingDirection.Out),
+                                                { BackgroundColor3 = baseBg })
+                                        if lbl.Text == "Callback Error" then lbl.Text = origText end
+                                        Tween(lbl, TweenInfo.new(0.45, Enum.EasingStyle.Quint,
+                                                Enum.EasingDirection.Out),
+                                                { TextColor3 = baseText })
+                                end)
+                        end)
+                end
+        end)
+end
 
 -- ============================================================
 -- CreateWindow

@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v5.3.2 "Aurora" - self-contained Roblox UI library
+-- RezurXLib v5.4.0 "Aurora" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -68,7 +68,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.3.2 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.4.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))

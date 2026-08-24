@@ -1,6 +1,6 @@
 # 👑 RezurXLib
 
-**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.3.1.
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.4.0.
 
 ```lua
 local RezurXLib = loadstring(game:HttpGet(
@@ -33,10 +33,14 @@ local RezurXLib = require(game.ReplicatedStorage:WaitForChild("RezurXLib"))
 
 When the library loads you'll see two prints in the executor output:
 ```
-[RezurXLib] v5.3.1 module loaded. LocalPlayer=… PlayerGui=…
+[RezurXLib] v5.4.0 module loaded. LocalPlayer=… PlayerGui=…
 [RezurXLib] CreateWindow called: name="My Panel" theme=Lava host=Auto size=…
 ```
 If neither print appears, the failure is upstream of the library — typically a syntax error in your consumer script. Run `luau-analyze` on your script to find it.
+
+### Callback safety (v5.4.0)
+
+Every `Callback` you pass to any component is isolated: it runs in its own thread, and if it **throws**, the error is contained — the element flashes red, swaps its label to `Callback Error` for one second, and the full error is printed to the output with the element's name. A broken script callback can never freeze or kill the UI. This mirrors the guarded-callback architecture used by Rayfield Gen2, Fluent, WindUI, Maclib and Luna.
 
 ---
 
@@ -98,7 +102,7 @@ local Window = RezurXLib:CreateWindow({
 | `:LoadConfiguration()` | appliedCount | Read and replay saved values onto elements |
 | `:ModifyTheme(name\|palette)` | palette | Swap theme live |
 | `:CreateSettingsPanel(name?, icon?)` | Tab | Built-in settings tab (themes, motion, sounds) |
-| `:SetToggleKeybind(keycode)` | Enum.KeyCode | Rebind the show/hide key |
+| `:SetToggleKeybind(keycode)` | Enum.KeyCode | Rebind the show/hide key — refuses a key already bound to an element keybind |
 | `:OpenCommandPalette()` | overlay | Ctrl+K palette |
 | `:SetBrandText(text)` | applied text | Header badge (≤4 UTF-8 chars) |
 | `:SetRestoreText(text)` | applied text | Floating restore button text |
@@ -119,11 +123,11 @@ local Window = RezurXLib:CreateWindow({
 | `:CreateButton({ Name, Variant?, Icon?, Callback, Tooltip? })` | `:Set` | Variant: `"Primary"` / `"Secondary"` |
 | `:CreateMultiButton({ Buttons, Tooltip? })` | obj | Shared-row actions |
 | `:CreateToggle({ Name, CurrentValue?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Animated boolean |
-| `:CreateSlider({ Name, Range, CurrentValue, Increment?, Suffix?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Pointer + touch |
+| `:CreateSlider({ Name, Range, CurrentValue, Increment?, Suffix?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Pointer + touch + **typeable value box** (v5.4.0) |
 | `:CreateInput({ Name, CurrentValue?, PlaceholderText?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | Single-line |
 | `:CreateTextArea({ Title, Text?, Placeholder?, Callback?, Flag? })` | `:Set`/`:Get`/`:Reset` | Multi-line |
-| `:CreateDropdown({ Name, Options, CurrentOption?, MultipleOptions?, Searchable?, Tooltip?, Callback, Flag? })` | `:Set`/`:Get`/`:Refresh`/`:Reset` | Single/multi with fuzzy search |
-| `:CreateKeybind({ Name, CurrentKeybind?, HoldToInteract?, Callback, ChangedCallback?, Flag? })` | `:Set`/`:Get`/`:Reset` | Click to rebind |
+| `:CreateDropdown({ Name, Options, CurrentOption?, MultipleOptions?, Searchable?, Tooltip?, Callback, Flag? })` | `:Set`/`:Get`/`:Refresh`/`:Add`/`:Remove`/`:Reset` | Single/multi with fuzzy search; living list ops (v5.4.0) |
+| `:CreateKeybind({ Name, CurrentKeybind?, HoldToInteract?, Callback, ChangedCallback?, Flag? })` | `:Set`/`:Get`/`:Reset` | Click to rebind; refuses the window toggle key |
 | `:CreateColorPicker({ Name, Color?, Presets?, Callback, Flag? })` | `:Set`/`:Get`/`:Reset` | HSV + RGB + Hex + swatches |
 | `:CreateAccordion({ Title, DefaultExpanded?, Tooltip? })` | obj | Collapsible container — call its `:Create*` to add children |
 | `:CreateBindable({ Name, Keybind?, Enabled?, Callback, Flag? })` | `:SetEnabled`/`:SetKeybind` | Toggle + keybind combined |
@@ -193,6 +197,8 @@ ConfigurationSaving = {
 
 Every element with a `Flag` persists itself to JSON on the executor filesystem and restores on the next run. Improvements over Rayfield's equivalent:
 - **Writes only when values actually changed** (2-second signature diffing)
+- **Atomic writes (v5.4.0)** — every save writes a parked `.saving` copy first, reads it back, and only then overwrites the real file. A crash mid-write can never shred your config.
+- **Corrupt-file recovery (v5.4.0)** — a config that fails to decode is preserved as `"<name> (Incorrect Format).rezx"`, removed, and you're told — instead of hammering the same corrupt bytes every session.
 - **Per-window flag isolation** — multiple windows never mix their configs
 - **Loads only after the key gate passes** — callbacks never replay behind a locked UI
 - **Manual control**: `Window:SaveConfiguration()` / `Window:LoadConfiguration()`

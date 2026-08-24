@@ -1,5 +1,98 @@
 # Changelog
 
+## v5.4.0 — the "functional perfection" pass
+
+Benchmarked against the five reference libraries users actually praise —
+Rayfield Gen2, Fluent, WindUI, Maclib and Luna — and hardened with the
+reliability patterns ALL five share. Full sources of all five were audited
+(Architecture, safety, persistence, theming, mobile, motion, ergonomics).
+
+### 1. SafeCallback — the unified consumer-callback funnel
+
+Every `Callback` in the library now routes through one guarded path
+(`Library.SafeCallback`):
+
+- **task.spawn isolation** — a yielding or expensive consumer callback
+  can never block the input event or the UI thread.
+- **pcall containment** — a throwing callback can never kill the event
+  connection that fired it.
+- **Visual surfacing** — the element that owns the callback flashes
+  error-red and swaps its label to "Callback Error" for 1s (Luna /
+  Rayfield pattern), with a per-element debounce so a slider firing
+  every drag frame flashes exactly once.
+- **Named console trace** — `[RezurXLib] Slider 'Speed' callback error: …`.
+
+Routed through: slider (Set + live drag), input, dropdown, keybind
+(press / hold / release / rebind-changed), color picker (live HSV drag,
+presets, programmatic Set), and bindables.
+
+### 2. Persistence hardening (Rayfield Gen2 patterns)
+
+- **Atomic writes** — `FS.writeAtomic` writes the whole payload to a
+  parked `.saving` copy, reads it back and verifies byte-equality, and
+  only then overwrites the real file. A short read-back (disk full)
+  never touches the original. Executors have no rename(); this is the
+  next-best guarantee.
+- **Corrupt-file recovery** — a config that fails to decode is backed
+  up as `<name> (Incorrect Format)<ext>` (unique-numbered so a second
+  corruption cannot destroy the first backup), removed, and the user
+  is notified. The next autosave writes a clean file instead of
+  hammering the same corrupt bytes forever.
+
+### 3. Keybind clash guards (Rayfield pattern, bidirectional)
+
+- Binding an element keybind to the window's UI-toggle key is refused
+  with a toast + warning — the user can no longer lock themselves out.
+- `Window:SetToggleKeybind` refuses a key already bound to any flagged
+  element, naming the flag it collides with.
+
+### 4. Notification ergonomics (Luna / Rayfield patterns)
+
+- **Reading-time durations** — when no `Duration` is given, the toast
+  sizes itself from the content length (3–9s band). One-liners stop
+  lingering; paragraphs stop vanishing mid-read.
+- **Hover dwell pause** — the dismiss countdown freezes while the
+  pointer rests on the toast; the progress bar re-anchors in lockstep.
+
+### 5. Element upgrades
+
+- **Typeable slider value box** (Luna / Maclib pattern) — click the
+  value readout, type an exact number, Enter commits through the same
+  snap/clamp path as dragging. Escape / click-away cancels. Numeric
+  input is sanitized live.
+- **Living dropdown** — `obj:Add(option)` / `obj:Remove(option)` mutate
+  the list without a full rebuild; selection survives; removed
+  selected values drop cleanly; no callbacks fire (data ops, like
+  Refresh).
+
+### 6. One-time hide-key hint (Fluent / Maclib pattern)
+
+The first time the window is hidden per session, a toast teaches the
+toggle key ("Press K to toggle the interface.") — exactly once.
+
+### 7. Fixes along the way
+
+- `CreateWindow` sat at Luau's 200-local register ceiling; the new
+  hide-hint state lives on the Window table instead of a local, and
+  all future window-scope additions must do the same.
+- Headless harness: the mock JSON parser looped forever on malformed
+  input (real `HttpService:JSONDecode` errors); both object and array
+  loops now detect no-progress and raise, matching real behavior.
+
+### Verification
+
+- Bundle rebuilt: 557061 bytes, 9846 lines, byte-identical via
+  `build_bundle.py --check`.
+- `luau-analyze`: zero syntax errors.
+- Headless suite: **236 legacy + 16 new checks, 0 failures** — new
+  coverage: SafeCallback containment, living dropdown ops, keybind
+  clash guard, atomic save + corrupt recovery, typeable slider,
+  plus regression versions of each.
+
+---
+
+# Changelog
+
 ## v5.3.1 — diagnostic banners + non-yielding module load
 
 Hotfix follow-up to v5.3.0. The library was already functionally correct

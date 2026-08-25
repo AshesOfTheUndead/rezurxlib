@@ -138,6 +138,17 @@ function Library:CreateWindow(cfg)
                         if ThemeTokenSet[key] and typeof(value) == "Color3" then C[key] = value end
                 end
         end
+        -- [v5.5.1 FIX — RUNTIME CRASH] Legacy themes (Quiet/Ember/Ocean/Crimson)
+        -- predate the `secondary` token; custom palettes may omit it too. A
+        -- nil secondary made every C.secondary gradient keypoint throw
+        -- "bad ColorSequence keypoint" inside CreateWindow (the TopEdge
+        -- gradient since v5.2.0; the Magma edge-bar + divider since v5.5.0).
+        -- Normalized here so the token is ALWAYS a Color3: presets keep their
+        -- explicit secondary; everything else inherits the accent's bright
+        -- ladder step — visually harmonious on every legacy palette.
+        if typeof(C.secondary) ~= "Color3" then
+                C.secondary = C.accentHi
+        end
         C.borderAcc = C.accent
 
         local MIN_W = math.max(280, readDimension(cfg.MinSize, "X", 300))
@@ -2643,6 +2654,11 @@ function Library:CreateWindow(cfg)
                         end
                 end
                 if type(theme) == "string" then activeThemeName = theme end
+                -- [v5.5.1] Same secondary normalization as CreateWindow: a
+                -- partial custom table merge must never leave the token nil.
+                if typeof(C.secondary) ~= "Color3" then
+                        C.secondary = C.accentHi
+                end
                 C.borderAcc = C.accent
                 for _, fn in ipairs(ThemeRefreshers) do
                         pcall(fn)

@@ -1,5 +1,44 @@
 # Changelog
 
+## v5.5.1 — hotfix: "bad ColorSequence keypoint" crash on legacy themes
+
+Runtime crash in `CreateWindow`, present since v5.2.0 on every legacy
+theme (Quiet — the default — Ember, Ocean, Crimson) and on any custom
+palette without a `secondary` token: `C.secondary` stayed nil and the
+TopEdge gradient's `ColorSequenceKeypoint.new(1.0, C.secondary)` threw
+at construction. v5.5.0's Magma edge-bar and divider added four more
+`C.secondary` keypoints, widening the blast radius.
+
+### The fix (three layers)
+
+1. **Source normalization** — every built-in theme is completed at load:
+   missing `secondary` inherits `accentHi` (the accent's bright ladder
+   step). `GetTheme`/`RegisterTheme` clones are always complete.
+2. **CreateWindow guard** — the per-window palette `C` normalizes after
+   the preset + CustomTheme merge, covering hand-built palette tables
+   passed directly as `cfg.Theme`.
+3. **ModifyTheme guard** — live theme swaps can never leave the token
+   nil on a running window.
+
+### Harness hardening
+
+The headless mock's `ColorSequenceKeypoint.new` now validates its
+arguments exactly like the real engine (number time in [0,1], Color3
+value) — the old mock silently accepted nil colors, which is why the
+273-check suite never caught a crash real Roblox hit instantly. This
+entire bug class is now detectable headlessly.
+
+### Verification
+
+- Suite: **286 passed, 0 failed** (13 new v5.5.1 checks: every legacy
+  theme constructs cleanly, registered secondary-less palettes
+  complete, live ModifyTheme to a legacy theme is safe).
+- Restaurant MAX UI block: ok=true, zero warnings on v5.5.1.
+
+---
+
+# Changelog
+
 ## v5.5.0 "Magma" — Rayfield Gen2 × Maclib visual cross, lava signature
 
 The layout redesign users asked for: the chrome DNA of Rayfield Gen2

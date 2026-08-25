@@ -29,6 +29,12 @@ function Library:RegisterTheme(name, palette)
                         warn("[RezurXLib] Ignoring invalid theme token: " .. tostring(key))
                 end
         end
+        -- [v5.5.1] Complete the palette: a custom theme without `secondary`
+        -- would leave C.secondary nil at CreateWindow and crash every
+        -- C.secondary gradient keypoint ("bad ColorSequence keypoint").
+        if typeof(merged.secondary) ~= "Color3" then
+                merged.secondary = typeof(merged.accentHi) == "Color3" and merged.accentHi or merged.accent
+        end
         Themes[name] = merged
         return cloneTheme(merged)
 end

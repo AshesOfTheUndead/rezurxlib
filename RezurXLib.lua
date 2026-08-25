@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v5.5.0 "Magma" - self-contained Roblox UI library
+-- RezurXLib v5.5.1 "Magma" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -68,7 +68,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.5.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.5.1 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))
@@ -404,9 +404,22 @@ Themes.Emerald = buildPreset("Emerald",
         Color3.fromRGB(0, 255, 136), Color3.fromRGB(0, 179, 89), Color3.fromRGB(10, 18, 14),
         "Utility, ESP, engine trackers")
 
+-- [v5.5.1 FIX — RUNTIME CRASH] Legacy themes predate the `secondary` token
+-- (added with the v5.2.0 presets). A nil secondary crashed every
+-- C.secondary gradient keypoint with "bad ColorSequence keypoint" inside
+-- CreateWindow — on any legacy or secondary-less palette. Normalize the
+-- SOURCE themes so GetTheme/RegisterTheme clones are always complete; the
+-- CreateWindow and ModifyTheme guards remain as belt-and-braces for
+-- hand-built palette tables passed directly as cfg.Theme.
+for _, preset in pairs(Themes) do
+        if typeof(preset.secondary) ~= "Color3" then
+                preset.secondary = typeof(preset.accentHi) == "Color3" and preset.accentHi or preset.accent
+        end
+end
+
 local ThemeTokenSet = {}
 for token in pairs(Themes.Quiet) do ThemeTokenSet[token] = true end
-ThemeTokenSet.secondary = true -- [v5.2.0]
+ThemeTokenSet.secondary = true -- [v5.2.0] (redundant since v5.5.1: Quiet now owns it)
 
 -- Active palette. Mutated in place by ApplyTheme so every
 -- closure that captured `C` keeps reading fresh values.
@@ -1026,7 +1039,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.5.0"
+Library.Version = "5.5.1"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -1231,6 +1244,17 @@ function Library:CreateWindow(cfg)
                 for key, value in pairs(ct) do
                         if ThemeTokenSet[key] and typeof(value) == "Color3" then C[key] = value end
                 end
+        end
+        -- [v5.5.1 FIX — RUNTIME CRASH] Legacy themes (Quiet/Ember/Ocean/Crimson)
+        -- predate the `secondary` token; custom palettes may omit it too. A
+        -- nil secondary made every C.secondary gradient keypoint throw
+        -- "bad ColorSequence keypoint" inside CreateWindow (the TopEdge
+        -- gradient since v5.2.0; the Magma edge-bar + divider since v5.5.0).
+        -- Normalized here so the token is ALWAYS a Color3: presets keep their
+        -- explicit secondary; everything else inherits the accent's bright
+        -- ladder step — visually harmonious on every legacy palette.
+        if typeof(C.secondary) ~= "Color3" then
+                C.secondary = C.accentHi
         end
         C.borderAcc = C.accent
 
@@ -3737,6 +3761,11 @@ function Library:CreateWindow(cfg)
                         end
                 end
                 if type(theme) == "string" then activeThemeName = theme end
+                -- [v5.5.1] Same secondary normalization as CreateWindow: a
+                -- partial custom table merge must never leave the token nil.
+                if typeof(C.secondary) ~= "Color3" then
+                        C.secondary = C.accentHi
+                end
                 C.borderAcc = C.accent
                 for _, fn in ipairs(ThemeRefreshers) do
                         pcall(fn)
@@ -9734,6 +9763,12 @@ function Library:RegisterTheme(name, palette)
                 else
                         warn("[RezurXLib] Ignoring invalid theme token: " .. tostring(key))
                 end
+        end
+        -- [v5.5.1] Complete the palette: a custom theme without `secondary`
+        -- would leave C.secondary nil at CreateWindow and crash every
+        -- C.secondary gradient keypoint ("bad ColorSequence keypoint").
+        if typeof(merged.secondary) ~= "Color3" then
+                merged.secondary = typeof(merged.accentHi) == "Color3" and merged.accentHi or merged.accent
         end
         Themes[name] = merged
         return cloneTheme(merged)

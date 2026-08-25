@@ -267,9 +267,22 @@ Themes.Emerald = buildPreset("Emerald",
         Color3.fromRGB(0, 255, 136), Color3.fromRGB(0, 179, 89), Color3.fromRGB(10, 18, 14),
         "Utility, ESP, engine trackers")
 
+-- [v5.5.1 FIX — RUNTIME CRASH] Legacy themes predate the `secondary` token
+-- (added with the v5.2.0 presets). A nil secondary crashed every
+-- C.secondary gradient keypoint with "bad ColorSequence keypoint" inside
+-- CreateWindow — on any legacy or secondary-less palette. Normalize the
+-- SOURCE themes so GetTheme/RegisterTheme clones are always complete; the
+-- CreateWindow and ModifyTheme guards remain as belt-and-braces for
+-- hand-built palette tables passed directly as cfg.Theme.
+for _, preset in pairs(Themes) do
+        if typeof(preset.secondary) ~= "Color3" then
+                preset.secondary = typeof(preset.accentHi) == "Color3" and preset.accentHi or preset.accent
+        end
+end
+
 local ThemeTokenSet = {}
 for token in pairs(Themes.Quiet) do ThemeTokenSet[token] = true end
-ThemeTokenSet.secondary = true -- [v5.2.0]
+ThemeTokenSet.secondary = true -- [v5.2.0] (redundant since v5.5.1: Quiet now owns it)
 
 -- Active palette. Mutated in place by ApplyTheme so every
 -- closure that captured `C` keeps reading fresh values.

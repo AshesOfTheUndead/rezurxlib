@@ -1,6 +1,6 @@
 # 👑 RezurXLib
 
-**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.5.0 "Magma".
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.5.1 "Magma".
 
 ```lua
 local RezurXLib = loadstring(game:HttpGet(

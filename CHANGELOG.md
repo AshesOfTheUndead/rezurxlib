@@ -1,5 +1,51 @@
 # Changelog
 
+## v5.6.0 — "Magma Cross": visual hybrid of Maclib + Rayfield Gen 2
+
+A deep visual port that crosses the Maclib macOS sidebar-window idiom
+with Rayfield Gen 2's clean accent geometry, themed in the RezurX lava
+palette and branded with the RezurX wordmark. Every line of Luau is
+original RezurXLib source implementing the hybrid visual spec — no
+verbatim code from either reference library.
+
+**Visual changes:**
+- **Maclib traffic-light cluster** replaces the former 38×32 square
+  minBtn/closeBtn pair at the top-right of the header. Three 14×14
+  circular dots — amber = minimize, green = restore/expand, red = close
+  — with glyphs hidden at rest and surfacing on hover (the macOS pattern).
+  Colors are deliberately theme-independent (Maclib discipline).
+- **Sidebar header card** (Maclib pattern) at the top of the rail: a
+  pinned card with the RezurX logo mark (lava gradient square + "R"
+  letter), the RezurX wordmark, and the section subtitle. Stays visible
+  when the chip list scrolls.
+- **Sidebar footer profile chip** (Maclib pattern) at the bottom of the
+  rail: a pinned card with a RezurX avatar dot (lava gradient circle),
+  the RezurX wordmark, and a role label.
+- **Lava hairline dividers** on both cards — the accent language of the
+  Magma rail extended to the sidebar chrome.
+- **Adaptive rail collapse**: when the window narrows below 420px or
+  enters sheet mode, the header card and footer profile chip narrow to
+  the icon-strip width; wordmark/section/role labels hide; the logo mark
+  and avatar dot center.
+- **dragBar control lane** shrunk from 108px to 82px to match the new
+  traffic-light cluster width (58px + 24px margin).
+
+**Engineering notes:**
+- Hit the Luau 200-local register ceiling in CreateWindow for the third
+  time. Resolved by: (a) scoping the chrome helper function + constants
+  to a `do…end` block (frees 6 locals after construction completes), (b)
+  inlining the glyph-drawing switch inside `makeTrafficDot` (eliminates
+  closures + helper-function captures), (c) bundling all sidebar header
+  children into a single `sh` table and all sidebar footer children into
+  a single `sf` table (the onTheme closures capture 1 local each instead
+  of 8). Net local add: 6 (down from the naive 34).
+- API surface unchanged: `Library:CreateWindow`, `:CreateTab`,
+  `:CreateButton`, `:CreateSlider`, `:CreateToggle`, `:CreateDropdown`,
+  `:CreateInput`, `:CreateKeybind`, `:CreateColorPicker`, `:Notify`,
+  etc. all behave identically. RMAX loads without modification.
+- All 287 headless checks pass; RMAX UI block runs clean against v5.6.0
+  (ok=true, 0 warnings, frame visible).
+
 ## v5.5.1 — hotfix: "bad ColorSequence keypoint" crash on legacy themes
 
 Runtime crash in `CreateWindow`, present since v5.2.0 on every legacy

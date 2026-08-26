@@ -1,6 +1,8 @@
 # 👑 RezurXLib
 
-**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.5.1 "Magma".
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.6.0 "Magma Cross".
+
+> **Visual language attribution:** v5.6.0 is a remade visual cross of [Maclib](https://github.com/.../maclib) (MIT) and [Rayfield Gen 2](https://github.com/SiriusSoftwareLtd/rayfield-gen2) (MIT). The traffic-light window controls, the sidebar header card + footer profile chip, the rail discipline, and the chip measurement language are visual ports of those libraries' published UI idioms, re-implemented in fresh Luau inside RezurXLib's API surface and themed with the RezurX lava palette. Both source libraries are MIT-licensed and their attribution is preserved here; this codebase contains no verbatim source from either library — every line is original RezurXLib Luau implementing the hybrid visual spec.
 
 ```lua
 local RezurXLib = loadstring(game:HttpGet(

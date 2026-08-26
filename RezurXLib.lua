@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v5.5.1 "Magma" - self-contained Roblox UI library
+-- RezurXLib v5.6.0 "Magma Cross" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -68,7 +68,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.5.1 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.6.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))
@@ -1039,7 +1039,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.5.1"
+Library.Version = "5.6.0"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 
@@ -2329,64 +2329,148 @@ function Library:CreateWindow(cfg)
         end) end
 
 
-        -- MINIMIZE + HIDE buttons
-        local minBtn = Instance.new("TextButton")
-        minBtn.Text = ""
-        minBtn.Size = UDim2.new(0, 38, 0, 32)
-        minBtn.Position = UDim2.new(1, -98, 0.5, -14)
-        minBtn.BackgroundColor3 = C.panelAlt
-        minBtn.BorderSizePixel = 0
-        minBtn.AutoButtonColor = false
-        minBtn.ZIndex = 5
-        minBtn.Selectable = true
-        minBtn.Parent = header
-        corner(minBtn, R.small)
-        local minStroke = stroke(minBtn, C.border, 1)
+        -- [v5.6.0 MAGMA CROSS] MACLIB-STYLE TRAFFIC-LIGHT CLUSTER — three
+        -- 14×14 circular dots at the top-right of the header replace the
+        -- former 38×32 square minBtn/closeBtn pair. macOS sidebar-window
+        -- idiom: amber = minimize (collapses to header), green = restore
+        -- (un-minimizes / un-hides), red = close (hides the window entirely).
+        -- Glyphs are hidden at rest and surface on hover — the macOS pattern.
+        -- Colors are deliberately theme-independent (Maclib discipline): the
+        -- traffic-light vocabulary reads the same on every palette. All three
+        -- dots wire to the same setHidden / setMinimized behavior the old
+        -- buttons used; no API surface change. minGlyph stays forward-declared
+        -- so the existing Rotation tween in setMinimized keeps operating.
+        -- [v5.6.0 REGISTER BUDGET] The helper function + constants are scoped
+        -- to a do-block so they don't consume CreateWindow's local registers
+        -- after construction completes. The dot MouseEnter/Leave closures
+        -- capture only their own locals (dotScale, glyph) — they live in
+        -- makeTrafficDot's own register table, not CreateWindow's.
+        local minGlyph  -- forward-declared (referenced in setMinimized)
+        local minBtn, toggleBtn, closeBtn  -- forward-declared (Activated wiring)
+        do
+                local TL_SIZE = 14
+                local TL_GAP = 8
+                local TL_TOTAL = TL_SIZE * 3 + TL_GAP * 2 -- 58px wide
+                local trafficLights = Instance.new("Frame")
+                trafficLights.Name = "TrafficLights"
+                trafficLights.Size = UDim2.fromOffset(TL_TOTAL, TL_SIZE)
+                trafficLights.Position = UDim2.new(1, -TL_TOTAL - 14, 0.5, -TL_SIZE / 2)
+                trafficLights.BackgroundTransparency = 1
+                trafficLights.ZIndex = 5
+                trafficLights.Parent = header
 
-        local minGlyph = Instance.new("Frame")
-        minGlyph.Size = UDim2.new(0, 12, 0, 2)
-        minGlyph.AnchorPoint = Vector2.new(0.5, 0.5)
-        minGlyph.Position = UDim2.new(0.5, 0, 0.5, 0)
-        minGlyph.BackgroundColor3 = C.muted
-        minGlyph.BorderSizePixel = 0
-        minGlyph.ZIndex = 5
-        minGlyph.Parent = minBtn
-        corner(minGlyph, UDim.new(1, 0))
+                local trafficLayout = Instance.new("UIListLayout")
+                trafficLayout.FillDirection = Enum.FillDirection.Horizontal
+                trafficLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+                trafficLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+                trafficLayout.Padding = UDim.new(0, TL_GAP)
+                trafficLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                trafficLayout.Parent = trafficLights
 
-        -- [v4.4.0] Min/close hover: 1.08x scale + soft glow ring — the window
-        -- controls now feel as polished as the content (as requested).
-        local minScale = Instance.new("UIScale")
-        minScale.Name = "_HoverScale"
-        minScale.Scale = 1
-        minScale.Parent = minBtn
-        local minRing = Instance.new("Frame")
-        minRing.Name = "HoverGlow"
-        minRing.Size = UDim2.new(1, 8, 1, 8)
-        minRing.Position = UDim2.new(0, -4, 0, -4)
-        minRing.BackgroundColor3 = C.accent
-        minRing.BackgroundTransparency = 1
-        minRing.BorderSizePixel = 0
-        minRing.ZIndex = 4
-        minRing.Parent = minBtn
-        corner(minRing, concentric(R.small, 4))
-        minBtn.MouseEnter:Connect(function()
-                Tween(minBtn, T10, { BackgroundColor3 = C.panelHov })
-                Tween(minGlyph, T10, { BackgroundColor3 = C.text })
-                Tween(minStroke, T10, { Color = C.accentDim })
-                Tween(minScale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.08 })
-                Tween(minRing, T15, { BackgroundTransparency = 0.88 })
-        end)
-        minBtn.MouseLeave:Connect(function()
-                Tween(minBtn, T10, { BackgroundColor3 = C.panelAlt })
-                Tween(minGlyph, T10, { BackgroundColor3 = C.muted })
-                Tween(minStroke, T10, { Color = C.border })
-                Tween(minScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 })
-                Tween(minRing, T15, { BackgroundTransparency = 1 })
-        end)
-        onTheme(function()
-                Tween(minBtn, T20, { BackgroundColor3 = C.panelAlt })
-                Tween(minStroke, T20, { Color = C.border })
-        end)
+                local function makeTrafficDot(name, baseColor, glyphColor, order, glyphType)
+                        local dot = Instance.new("TextButton")
+                        dot.Name = name
+                        dot.Text = ""
+                        dot.Size = UDim2.fromOffset(TL_SIZE, TL_SIZE)
+                        dot.BackgroundColor3 = baseColor
+                        dot.AutoButtonColor = false
+                        dot.BorderSizePixel = 0
+                        dot.ZIndex = 6
+                        dot.Selectable = true
+                        dot.LayoutOrder = order
+                        dot.Parent = trafficLights
+                        corner(dot, UDim.new(1, 0)) -- fully circular
+                        local dotScale = Instance.new("UIScale")
+                        dotScale.Name = "_HoverScale"
+                        dotScale.Scale = 1
+                        dotScale.Parent = dot
+                        -- [v5.6.0] Glyph frame: hidden at rest, surfaces on hover.
+                        local glyph = Instance.new("Frame")
+                        glyph.Name = "Glyph"
+                        glyph.Size = UDim2.fromScale(1, 1)
+                        glyph.BackgroundTransparency = 1
+                        glyph.Visible = false
+                        glyph.ZIndex = 7
+                        glyph.Parent = dot
+                        -- [v5.6.0] Switch on glyphType — inlines the dash / chevron
+                        -- / X drawing so no closures or helper functions are
+                        -- captured (keeps the outer local count under Luau's 200).
+                        local extra = nil
+                        if glyphType == "dash" then
+                                local dash = Instance.new("Frame")
+                                dash.Name = "Dash"
+                                dash.Size = UDim2.fromOffset(6, 2)
+                                dash.AnchorPoint = Vector2.new(0.5, 0.5)
+                                dash.Position = UDim2.fromScale(0.5, 0.5)
+                                dash.BackgroundColor3 = glyphColor
+                                dash.BorderSizePixel = 0
+                                dash.ZIndex = 7
+                                dash.Parent = glyph
+                                corner(dash, UDim.new(1, 0))
+                                extra = dash
+                        elseif glyphType == "chevron" then
+                                local left = Instance.new("Frame")
+                                left.Name = "ChevLeft"
+                                left.Size = UDim2.fromOffset(4, 2)
+                                left.AnchorPoint = Vector2.new(1, 0.5)
+                                left.Position = UDim2.fromScale(0.45, 0.55)
+                                left.Rotation = 45
+                                left.BackgroundColor3 = glyphColor
+                                left.BorderSizePixel = 0
+                                left.ZIndex = 7
+                                left.Parent = glyph
+                                corner(left, UDim.new(1, 0))
+                                local right = left:Clone()
+                                right.Name = "ChevRight"
+                                right.AnchorPoint = Vector2.new(0, 0.5)
+                                right.Position = UDim2.fromScale(0.55, 0.55)
+                                right.Rotation = -45
+                                right.Parent = glyph
+                        elseif glyphType == "x" then
+                                local x1 = Instance.new("Frame")
+                                x1.Name = "X1"
+                                x1.Size = UDim2.fromOffset(7, 2)
+                                x1.AnchorPoint = Vector2.new(0.5, 0.5)
+                                x1.Position = UDim2.fromScale(0.5, 0.5)
+                                x1.Rotation = 45
+                                x1.BackgroundColor3 = glyphColor
+                                x1.BorderSizePixel = 0
+                                x1.ZIndex = 7
+                                x1.Parent = glyph
+                                corner(x1, UDim.new(1, 0))
+                                local x2 = x1:Clone()
+                                x2.Name = "X2"
+                                x2.Rotation = -45
+                                x2.Parent = glyph
+                        end
+                        dot.MouseEnter:Connect(function()
+                                Tween(dotScale, T10, { Scale = 1.14 })
+                                glyph.Visible = true
+                        end)
+                        dot.MouseLeave:Connect(function()
+                                Tween(dotScale, T15, { Scale = 1 })
+                                glyph.Visible = false
+                        end)
+                        return dot, extra
+                end
+
+                -- AMBER = minimize (collapse to header). The returned dash
+                -- frame is captured as minGlyph so the existing Rotation
+                -- tween in setMinimized still operates (subtle hover flip).
+                local _
+                minBtn, _ = makeTrafficDot("MinDot",
+                        Color3.fromRGB(255, 192, 65), Color3.fromRGB(60, 40, 0), 1, "dash")
+                if _ then minGlyph = _ end
+
+                -- GREEN = restore / expand (un-minimize, un-hide)
+                toggleBtn = makeTrafficDot("ToggleDot",
+                        Color3.fromRGB(72, 215, 109), Color3.fromRGB(0, 50, 20), 2, "chevron")
+
+                -- RED = close (hide window). Variable name preserved so the
+                -- existing closeBtn.Activated wiring continues to work.
+                closeBtn = makeTrafficDot("CloseDot",
+                        Color3.fromRGB(255, 95, 87), Color3.fromRGB(80, 0, 0), 3, "x")
+        end
 
         -- MINIMIZE LOGIC moved below — it references tabBar/content/statusBar,
         -- which aren't created until later in this function. Wiring
@@ -2394,74 +2478,6 @@ function Library:CreateWindow(cfg)
         -- upvalues; clicking minimize threw silently (visible in the dev
         -- console, invisible to the player) and did nothing. See the
         -- consolidated HIDE / SHOW / MINIMIZE / TOGGLE KEYBIND section.
-
-        local closeBtn = Instance.new("TextButton")
-        closeBtn.Text = ""
-        closeBtn.Size = UDim2.new(0, 38, 0, 32)
-        closeBtn.Position = UDim2.new(1, -56, 0.5, -14)
-        closeBtn.BackgroundColor3 = Color3.fromRGB(120, 30, 30)
-        closeBtn.BorderSizePixel = 0
-        closeBtn.AutoButtonColor = false
-        closeBtn.ZIndex = 5
-        closeBtn.Selectable = true
-        closeBtn.Parent = header
-        corner(closeBtn, R.small)
-        local closeStroke = stroke(closeBtn, Color3.fromRGB(160, 50, 50), 1)
-        local closeGrad = gradient(closeBtn, ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Color3.fromRGB(150, 40, 40)),
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(95, 22, 22)),
-        }), 90)
-
-        -- soft glow ring behind the button, only visible on hover
-        local closeGlow = Instance.new("Frame")
-        closeGlow.Size = UDim2.new(1, 14, 1, 14)
-        closeGlow.AnchorPoint = Vector2.new(0.5, 0.5)
-        closeGlow.Position = UDim2.new(0.5, 0, 0.5, 0)
-        closeGlow.BackgroundColor3 = C.red
-        closeGlow.BackgroundTransparency = 1
-        closeGlow.BorderSizePixel = 0
-        closeGlow.ZIndex = 4
-        closeGlow.Parent = header
-        corner(closeGlow, R.small + 4)
-
-        -- line-drawn X (two crossed bars) instead of a text glyph — matches
-        -- minGlyph's visual language rather than mixing fonts/weights
-        local xBar1 = Instance.new("Frame")
-        xBar1.Size = UDim2.new(0, 13, 0, 2)
-        xBar1.AnchorPoint = Vector2.new(0.5, 0.5)
-        xBar1.Position = UDim2.new(0.5, 0, 0.5, 0)
-        xBar1.Rotation = 45
-        xBar1.BackgroundColor3 = C.white
-        xBar1.BorderSizePixel = 0
-        xBar1.ZIndex = 6
-        xBar1.Parent = closeBtn
-        corner(xBar1, UDim.new(1, 0))
-        local xBar2 = xBar1:Clone()
-        xBar2.Rotation = -45
-        xBar2.Parent = closeBtn
-
-        local closeScale = Instance.new("UIScale")
-        closeScale.Name = "_HoverScale"
-        closeScale.Scale = 1
-        closeScale.Parent = closeBtn
-        closeBtn.MouseEnter:Connect(function()
-                Tween(closeBtn, T10, { BackgroundColor3 = Color3.fromRGB(210, 55, 55) })
-                Tween(closeStroke, T10, { Color = Color3.fromRGB(255, 120, 120) })
-                Tween(closeGlow, T15, { BackgroundTransparency = 0.75 })
-                Tween(closeScale, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1.08 })
-        end)
-        closeBtn.MouseLeave:Connect(function()
-                Tween(closeBtn, T10, { BackgroundColor3 = Color3.fromRGB(120, 30, 30) })
-                Tween(closeStroke, T10, { Color = Color3.fromRGB(160, 50, 50) })
-                Tween(closeGlow, T15, { BackgroundTransparency = 1 })
-                Tween(closeScale, TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = 1 })
-        end)
-        closeBtn.MouseButton1Down:Connect(function()
-                Tween(closeBtn, TPRESS, { Size = UDim2.new(0, 34, 0, 29) })
-        end)
-        closeBtn.MouseButton1Up:Connect(function()
-                Tween(closeBtn, T10, { Size = UDim2.new(0, 38, 0, 32) })
-        end)
 
         -- ═══ FLOATING RESTORE ICON ═══
         local floatIcon = Instance.new("TextButton")
@@ -2588,14 +2604,15 @@ function Library:CreateWindow(cfg)
         -- ------------------------------------------------------------
         local dragBar = Instance.new("TextButton")
         dragBar.Name = "DragBar"
-        dragBar.Size = UDim2.new(1, -108, 1, 0)
+        dragBar.Size = UDim2.new(1, -82, 1, 0)
         dragBar.Position = UDim2.new(0, 0, 0, 0)
         dragBar.BackgroundTransparency = 1
         dragBar.Text = ""
         dragBar.AutoButtonColor = false
         dragBar.BorderSizePixel = 0
-        -- [FIX] ZIndex 6 = above logoGlow(4), statFrame(5), logo(5), subLbl(5)
-        -- and leaves a 108px control lane, so minBtn/closeBtn stay tappable.
+        -- [v5.6.0] ZIndex 6 = above logoGlow(4), statFrame(5), logo(5), subLbl(5).
+        -- Leaves an 82px control lane on the right for the Maclib traffic-light
+        -- cluster (58px wide + 12px right padding + 12px left margin).
         dragBar.ZIndex = 6
         dragBar.Active = true
         dragBar.Selectable = false
@@ -2640,11 +2657,19 @@ function Library:CreateWindow(cfg)
         local moveIndicatorTo = function() end
         local SIDEBAR_W = 156
         local SIDEBAR_ICON_W = 54
+        -- [v5.6.0 MAGMA CROSS] Maclib sidebar discipline: a fixed header
+        -- card at the top of the rail (RezurX logo + wordmark + section
+        -- subtitle) and a fixed footer profile chip at the bottom. The
+        -- scrollable chip list sits between them. Both cards are children
+        -- of `body` (not the scrolling tabBar) so they stay pinned when
+        -- the user scrolls the rail — the macOS sidebar pattern.
+        local HEADER_CARD_H = 64
+        local FOOTER_CARD_H = 56
         local sidebarIconMode = false
         local tabBar = Instance.new("ScrollingFrame")
         tabBar.Name = "TabRail"
-        tabBar.Size = UDim2.new(0, SIDEBAR_W, 1, -STATUSBAR_H)
-        tabBar.Position = UDim2.new(0, 0, 0, 0)
+        tabBar.Size = UDim2.new(0, SIDEBAR_W, 1, -STATUSBAR_H - HEADER_CARD_H - FOOTER_CARD_H)
+        tabBar.Position = UDim2.new(0, 0, 0, HEADER_CARD_H)
         tabBar.BackgroundColor3 = C.tabBarBg
         tabBar.BorderSizePixel = 0
         tabBar.ZIndex = 3
@@ -2657,6 +2682,213 @@ function Library:CreateWindow(cfg)
         tabBar.ElasticBehavior = Enum.ElasticBehavior.Never
         tabBar.Parent = body
         local tabBarStroke = stroke(tabBar, C.border, 1)
+
+        -- [v5.6.0 MAGMA CROSS] SIDEBAR HEADER CARD — Maclib pattern: a
+        -- pinned card at the top of the rail with the RezurX logo mark,
+        -- the RezurX wordmark, and a section subtitle. The logo mark is a
+        -- fully-rounded square wearing the lava gradient (accent →
+        -- accentDark) with the white "R" letter centered — the RezurX
+        -- signature scaled down to sidebar size. Wordmark + subtitle
+        -- stack to its right so the eye reads logo → brand → section.
+        -- [v5.6.0 REGISTER BUDGET] All children are bundled into a single
+        -- `sh` table so the onTheme closure captures only 1 local (the
+        -- table) instead of 8+ child references. Field accesses (sh.card,
+        -- sh.logo, etc.) compile to table index ops — no register cost.
+        local sh = {}
+        sh.card = Instance.new("Frame")
+        sh.card.Name = "SidebarHeaderCard"
+        sh.card.Size = UDim2.new(0, SIDEBAR_W, 0, HEADER_CARD_H)
+        sh.card.Position = UDim2.new(0, 0, 0, 0)
+        sh.card.BackgroundColor3 = C.tabBarBg
+        sh.card.BorderSizePixel = 0
+        sh.card.ZIndex = 8
+        sh.card.Parent = body
+        corner(sh.card, R.outer)
+        sh.grad = gradient(sh.card, ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, C.headerA),
+                ColorSequenceKeypoint.new(1.0, C.tabBarBg),
+        }, 90)
+        -- RezurX logo mark — lava gradient square with the "R" letter
+        sh.logo = Instance.new("Frame")
+        sh.logo.Name = "LogoMark"
+        sh.logo.Size = UDim2.fromOffset(28, 28)
+        sh.logo.AnchorPoint = Vector2.new(0, 0.5)
+        sh.logo.Position = UDim2.new(0, 12, 0.5, 0)
+        sh.logo.BackgroundColor3 = C.accentDark
+        sh.logo.BorderSizePixel = 0
+        sh.logo.ZIndex = 9
+        sh.logo.Parent = sh.card
+        corner(sh.logo, R.small)
+        sh.logoGrad = gradient(sh.logo, ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, C.accent),
+                ColorSequenceKeypoint.new(1.0, C.accentDark),
+        }, 135)
+        sh.logoLetter = Instance.new("TextLabel")
+        sh.logoLetter.Name = "Letter"
+        sh.logoLetter.Size = UDim2.fromScale(1, 1)
+        sh.logoLetter.BackgroundTransparency = 1
+        sh.logoLetter.Font = Enum.Font.GothamBlack
+        sh.logoLetter.TextSize = 14
+        sh.logoLetter.TextColor3 = C.white
+        sh.logoLetter.Text = "R"
+        sh.logoLetter.TextXAlignment = Enum.TextXAlignment.Center
+        sh.logoLetter.TextYAlignment = Enum.TextYAlignment.Center
+        sh.logoLetter.ZIndex = 10
+        sh.logoLetter.Parent = sh.logo
+        -- RezurX wordmark + section subtitle stack to the right of the logo
+        sh.wordmark = Instance.new("TextLabel")
+        sh.wordmark.Name = "Wordmark"
+        sh.wordmark.Size = UDim2.new(1, -52, 0, 16)
+        sh.wordmark.Position = UDim2.new(0, 48, 0, 14)
+        sh.wordmark.BackgroundTransparency = 1
+        sh.wordmark.Font = Enum.Font.GothamBold
+        sh.wordmark.TextSize = 13
+        sh.wordmark.TextColor3 = C.text
+        sh.wordmark.TextXAlignment = Enum.TextXAlignment.Left
+        sh.wordmark.Text = "RezurX"
+        sh.wordmark.ZIndex = 9
+        sh.wordmark.Parent = sh.card
+        sh.section = Instance.new("TextLabel")
+        sh.section.Name = "Section"
+        sh.section.Size = UDim2.new(1, -52, 0, 13)
+        sh.section.Position = UDim2.new(0, 48, 0, 32)
+        sh.section.BackgroundTransparency = 1
+        sh.section.Font = Enum.Font.GothamMedium
+        sh.section.TextSize = 10
+        sh.section.TextColor3 = C.muted
+        sh.section.TextXAlignment = Enum.TextXAlignment.Left
+        sh.section.Text = subtitle
+        sh.section.TextTruncate = Enum.TextTruncate.AtEnd
+        sh.section.ZIndex = 9
+        sh.section.Parent = sh.card
+        -- [v5.6.0] Lava hairline at the bottom of the header card so it
+        -- reads as its own surface rather than a continuation of the rail.
+        sh.divider = Instance.new("Frame")
+        sh.divider.Name = "Divider"
+        sh.divider.Size = UDim2.new(1, 0, 0, 1)
+        sh.divider.Position = UDim2.new(0, 0, 1, -1)
+        sh.divider.BackgroundColor3 = C.accent
+        sh.divider.BackgroundTransparency = 0.82
+        sh.divider.BorderSizePixel = 0
+        sh.divider.ZIndex = 9
+        sh.divider.Parent = sh.card
+        onTheme(function()
+                Tween(sh.card, T20, { BackgroundColor3 = C.tabBarBg })
+                sh.grad.Color = ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.headerA),
+                        ColorSequenceKeypoint.new(1.0, C.tabBarBg),
+                }
+                Tween(sh.logo, T20, { BackgroundColor3 = C.accentDark })
+                sh.logoGrad.Color = ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.accent),
+                        ColorSequenceKeypoint.new(1.0, C.accentDark),
+                }
+                Tween(sh.logoLetter, T20, { TextColor3 = C.white })
+                Tween(sh.wordmark, T20, { TextColor3 = C.text })
+                Tween(sh.section, T20, { TextColor3 = C.muted })
+                Tween(sh.divider, T20, { BackgroundColor3 = C.accent })
+        end)
+
+        -- [v5.6.0 MAGMA CROSS] SIDEBAR FOOTER PROFILE CHIP — Maclib
+        -- pattern: a pinned card at the bottom of the rail with a RezurX
+        -- avatar dot, a RezurX wordmark, and a role label. The avatar is a
+        -- fully-rounded lava-gradient circle (the RezurX signature scaled
+        -- to profile size). The card sits above the status bar and stays
+        -- visible even when the rail is scrolled — a persistent brand
+        -- footer. [v5.6.0 REGISTER BUDGET] Same `sf` table pattern as the
+        -- header card — onTheme captures 1 local instead of 8.
+        local sf = {}
+        sf.card = Instance.new("Frame")
+        sf.card.Name = "SidebarFooterCard"
+        sf.card.Size = UDim2.new(0, SIDEBAR_W, 0, FOOTER_CARD_H)
+        sf.card.Position = UDim2.new(0, 0, 1, -(STATUSBAR_H + FOOTER_CARD_H))
+        sf.card.BackgroundColor3 = C.tabBarBg
+        sf.card.BorderSizePixel = 0
+        sf.card.ZIndex = 8
+        sf.card.Parent = body
+        corner(sf.card, R.outer)
+        sf.grad = gradient(sf.card, ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, C.tabBarBg),
+                ColorSequenceKeypoint.new(1.0, C.headerB),
+        }, 90)
+        -- Top hairline accent (same lava language as the header card)
+        sf.divider = Instance.new("Frame")
+        sf.divider.Name = "Divider"
+        sf.divider.Size = UDim2.new(1, 0, 0, 1)
+        sf.divider.Position = UDim2.new(0, 0, 0, 0)
+        sf.divider.BackgroundColor3 = C.accent
+        sf.divider.BackgroundTransparency = 0.82
+        sf.divider.BorderSizePixel = 0
+        sf.divider.ZIndex = 9
+        sf.divider.Parent = sf.card
+        -- RezurX avatar dot (lava gradient circle)
+        sf.avatar = Instance.new("Frame")
+        sf.avatar.Name = "Avatar"
+        sf.avatar.Size = UDim2.fromOffset(24, 24)
+        sf.avatar.AnchorPoint = Vector2.new(0, 0.5)
+        sf.avatar.Position = UDim2.new(0, 12, 0.5, 0)
+        sf.avatar.BackgroundColor3 = C.accentDark
+        sf.avatar.BorderSizePixel = 0
+        sf.avatar.ZIndex = 9
+        sf.avatar.Parent = sf.card
+        corner(sf.avatar, UDim.new(1, 0))
+        sf.avatarGrad = gradient(sf.avatar, ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, C.accent),
+                ColorSequenceKeypoint.new(1.0, C.secondary),
+        }, 135)
+        sf.avatarLetter = Instance.new("TextLabel")
+        sf.avatarLetter.Name = "Letter"
+        sf.avatarLetter.Size = UDim2.fromScale(1, 1)
+        sf.avatarLetter.BackgroundTransparency = 1
+        sf.avatarLetter.Font = Enum.Font.GothamBold
+        sf.avatarLetter.TextSize = 11
+        sf.avatarLetter.TextColor3 = C.white
+        sf.avatarLetter.Text = "R"
+        sf.avatarLetter.TextXAlignment = Enum.TextXAlignment.Center
+        sf.avatarLetter.TextYAlignment = Enum.TextYAlignment.Center
+        sf.avatarLetter.ZIndex = 10
+        sf.avatarLetter.Parent = sf.avatar
+        -- RezurX wordmark + role label stack to the right of the avatar
+        sf.name = Instance.new("TextLabel")
+        sf.name.Name = "Name"
+        sf.name.Size = UDim2.new(1, -52, 0, 14)
+        sf.name.Position = UDim2.new(0, 44, 0, 12)
+        sf.name.BackgroundTransparency = 1
+        sf.name.Font = Enum.Font.GothamBold
+        sf.name.TextSize = 11
+        sf.name.TextColor3 = C.text
+        sf.name.TextXAlignment = Enum.TextXAlignment.Left
+        sf.name.Text = "RezurX"
+        sf.name.ZIndex = 9
+        sf.name.Parent = sf.card
+        sf.role = Instance.new("TextLabel")
+        sf.role.Name = "Role"
+        sf.role.Size = UDim2.new(1, -52, 0, 12)
+        sf.role.Position = UDim2.new(0, 44, 0, 26)
+        sf.role.BackgroundTransparency = 1
+        sf.role.Font = Enum.Font.GothamMedium
+        sf.role.TextSize = 9
+        sf.role.TextColor3 = C.muted
+        sf.role.TextXAlignment = Enum.TextXAlignment.Left
+        sf.role.Text = "Control Center"
+        sf.role.ZIndex = 9
+        sf.role.Parent = sf.card
+        onTheme(function()
+                Tween(sf.card, T20, { BackgroundColor3 = C.tabBarBg })
+                sf.grad.Color = ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.tabBarBg),
+                        ColorSequenceKeypoint.new(1.0, C.headerB),
+                }
+                Tween(sf.divider, T20, { BackgroundColor3 = C.accent })
+                Tween(sf.avatar, T20, { BackgroundColor3 = C.accentDark })
+                sf.avatarGrad.Color = ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.accent),
+                        ColorSequenceKeypoint.new(1.0, C.secondary),
+                }
+                Tween(sf.avatarLetter, T20, { TextColor3 = C.white })
+                Tween(sf.name, T20, { TextColor3 = C.text })
+                Tween(sf.role, T20, { TextColor3 = C.muted })
+        end)
 
         -- [v5.5.0] VERTICAL FADE MASKS: tabs that run past the rail's top or
         -- bottom edge fade out smoothly instead of cutting off hard. Tinted
@@ -2827,10 +3059,33 @@ function Library:CreateWindow(cfg)
                 if iconMode == sidebarIconMode then return end
                 sidebarIconMode = iconMode
                 local w = iconMode and SIDEBAR_ICON_W or SIDEBAR_W
-                tabBar.Size = UDim2.new(0, w, 1, -STATUSBAR_H)
+                tabBar.Size = UDim2.new(0, w, 1, -STATUSBAR_H - HEADER_CARD_H - FOOTER_CARD_H)
                 content.Size = UDim2.new(1, -w, 1, -STATUSBAR_H)
                 content.Position = UDim2.new(0, w, 0, 0)
                 tabDivider.Position = UDim2.new(0, w, 0, 0)
+                -- [v5.6.0] Collapse the header card + footer profile chip too:
+                -- in icon mode the wordmark + section/role labels hide and
+                -- the logo mark + avatar dot center. The cards stay pinned.
+                sh.card.Size = UDim2.new(0, w, 0, HEADER_CARD_H)
+                sh.wordmark.Visible = not iconMode
+                sh.section.Visible = not iconMode
+                if iconMode then
+                        sh.logo.AnchorPoint = Vector2.new(0.5, 0.5)
+                        sh.logo.Position = UDim2.new(0.5, 0, 0.5, 0)
+                else
+                        sh.logo.AnchorPoint = Vector2.new(0, 0.5)
+                        sh.logo.Position = UDim2.new(0, 12, 0.5, 0)
+                end
+                sf.card.Size = UDim2.new(0, w, 0, FOOTER_CARD_H)
+                sf.name.Visible = not iconMode
+                sf.role.Visible = not iconMode
+                if iconMode then
+                        sf.avatar.AnchorPoint = Vector2.new(0.5, 0.5)
+                        sf.avatar.Position = UDim2.new(0.5, 0, 0.5, 0)
+                else
+                        sf.avatar.AnchorPoint = Vector2.new(0, 0.5)
+                        sf.avatar.Position = UDim2.new(0, 12, 0.5, 0)
+                end
                 refreshTabChipModes()
                 task.defer(function()
                         if ActiveTab and ActiveTab.Btn and ActiveTab.Btn.Parent then
@@ -3636,6 +3891,17 @@ function Library:CreateWindow(cfg)
         end
         closeBtn.Activated:Connect(function()
                 setHidden(true)
+        end)
+        -- [v5.6.0] GREEN traffic-light dot = restore / expand. If the window
+        -- is hidden, this brings it back; if it's minimized, this expands it.
+        -- A no-op when already shown and expanded (same as macOS green dot
+        -- when the window is already at full size).
+        toggleBtn.Activated:Connect(function()
+                if hidden then
+                        setHidden(false)
+                elseif minimized then
+                        setMinimized(false)
+                end
         end)
         floatIcon.Activated:Connect(function()
                 if floatDragMoved then return end  -- [FIX] was a drag, not a tap

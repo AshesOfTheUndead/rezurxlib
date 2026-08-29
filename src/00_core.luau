@@ -1,5 +1,5 @@
 -- ============================================================
--- RezurXLib v5.7.1 "Aurora" - self-contained Roblox UI library
+-- RezurXLib v5.8.1 "Aurora" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
@@ -13,6 +13,13 @@
 -- global key listener, vector check glyphs everywhere, content edge
 -- fades, restore-ball hover, palette result icons — plus the
 -- CreateWindow register-overflow compile fix (gate → own function).
+-- [v5.8.1] visual repair pass: soft-falloff window shadow restored (the
+-- v5.8 degenerate 9-slice rendered a hard near-black slab), the top
+-- accent line now respects the corner radius instead of poking past
+-- the curve, and the green restore dot became a true toggle with a
+-- state-aware chevron (was a dead no-op with a backwards glyph). Also
+-- fixed two silent runtime errors: header double-click minimize and
+-- the configuration-restored toast both called nil globals.
 --
 -- Original implementation with tokenized themes, pointer-owned input,
 -- popup ownership, callback isolation, and no package dependency.
@@ -58,7 +65,7 @@ local ContentProvider  = game:GetService("ContentProvider")
 -- [v5.7.0] Re-run guard: executors that re-execute a loadstring bootstrap
 -- used to build a second Library (and a second window) on top of the first.
 -- When an identical version is already exported, hand it straight back.
-if type(_G) == "table" and _G.RezurXLib and _G.RezurXLib.Version == "5.7.1" then
+if type(_G) == "table" and _G.RezurXLib and _G.RezurXLib.Version == "5.8.1" then
         return _G.RezurXLib
 end
 
@@ -127,7 +134,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.7.1 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.8.1 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))

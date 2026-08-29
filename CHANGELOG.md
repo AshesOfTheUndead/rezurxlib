@@ -1,5 +1,84 @@
 # Changelog
 
+## v5.8.1 — "Lumen" + visual repair pass
+
+Recovers and finishes the v5.8 "Lumen" tree (register refactor, profile
+system, tab drag-reorder, glass accents) and repairs the three visual
+defects reported against it: hard-edged shadows, the dead green restore
+dot, and the straight top accent line poking past the window's rounded
+corners.
+
+**The three reported visual defects:**
+- **Shadows.** The v5.8 rewrite shipped a degenerate 9-slice shadow —
+  `SliceCenter 128,128,128,128` is a zero-area center, so the middle
+  stretched from a single texel into a hard-edged near-black slab around
+  the window, and the flat fallback re-used the image constants after the
+  entrance, leaving it permanently darker than its own rest state.
+  Restored the soft-falloff geometry: a 256px asset whose outer 64px band
+  carries the falloff (proper `SliceCenter 64,64,192,192`), pad 14, rest
+  transparency 0.80, drag-lift 0.64. When the texture cannot load
+  (offline executor / moderated asset) the shadow retires to a flat
+  concentric Frame resting at a **literal 0.86** (`SHADOW_REST_FLAT` —
+  derived `0.80 + 0.06` evaluated to 0.8600000000000001 in IEEE 754 and
+  every downstream equality check saw the epsilon-off value). One
+  constant set now feeds creation, entrance, drag-lift, and the 1s
+  watchdog; `cfg.ShadowImage` still overrides the asset for custom
+  9-slice-ready art.
+- **The green restore dot.** It was a no-op whenever the window was
+  already shown and expanded, and its glyph was two 4x2 arms that never
+  met — a 2.6px gap at the vertex, parked low in the dot, pointing DOWN
+  (a collapse cue on an expand control). It is now a true toggle
+  (hidden → show, minimized → expand, expanded → collapse) and the glyph
+  is a centered up-chevron: 6x2 arms sharing the apex at top-center. The
+  glyph container is center-anchored and `setMinimized` spins it 180
+  degrees, so the chevron always points where the next click takes the
+  window — up ("collapse to pill") when expanded, down ("expand back")
+  when minimized.
+- **The straight top accent line.** `TopEdgeAccent` spanned the FULL
+  frame width, but `ClipsDescendants` clips to the rect, not the
+  `UICorner` — the 2px bar poked ~12px past the 20px corner curve on
+  both sides, reading as a hard red ledge on Lava (worst on the
+  minimized pill, where the radius is a large share of the height). The
+  strip now starts and ends exactly where the corner arcs begin
+  (`Size (1, -2*R.outer, 0, 2)` at `x = R.outer`); the frame stroke
+  carries the accent around the curves, so the top reads as one sealed
+  edge — on the full window and on the minimized pill alike.
+
+**Silent runtime errors fixed:**
+- **Header double-click minimize** (new in v5.8) errored on every
+  double-click: the handler was wired at the dragBar, above
+  `setMinimized`'s declaration, so it resolved to a nil global. Now
+  wired after the declaration as a second `InputBegan` connection — the
+  drag router only engages after 5px of movement, so a clean
+  double-click never fights it.
+- **The configuration-restored toast** crashed its delayed thread: the
+  file-scope configuration builder referenced `notify` as a nil global
+  (the v5.8 extraction moved the code out of `CreateWindow`'s scope).
+  The builder now receives the notifier explicitly.
+
+**v5.8 "Lumen" feature set (recovered and completed):**
+- **Profile system.** Multi-slot flag profiles (default slots A/B/C):
+  snapshot all flagged elements, persist to `RezurXLib/Profiles/<window>
+  [slot].rezx`, apply back with live callbacks, per-slot "has data"
+  indicator dots. File-scope builders keep CreateWindow under Luau's
+  200-local register ceiling.
+- **Tab drag-reorder** — grab a tab chip and drag it to a new position.
+- **Glass accents ("Lumen"):** living accent sheen on the window title,
+  breathing glow on the active tab indicator, lit top edges on
+  notifications and cards, a one-shot radial entrance bloom, and a soft
+  halo behind armed toggles.
+- **Icon defaults:** windows and tabs without an explicit icon now draw
+  a vector fallback (a "gem" mark for windows; name-derived for tabs) —
+  no more empty squares.
+- **Chrome simplification:** the header glow strip and the header/body
+  accent line were removed — a single `TopEdgeAccent` carries the
+  accent, and the header/body boundary is the header gradient itself.
+
+**Verification:** 318 headless checks + 34 targeted fix checks, all
+passing; `luau-analyze` clean (Roblox globals excepted); bundle
+byte-identical to the src/ modules; RMAX UI block loads clean (frame
+visible, zero warnings).
+
 ## v5.7.1 — "Aurora" hotfix + advanced key system
 
 Built on the uncommitted v5.7.0 "Aurora" working tree (icon engine,

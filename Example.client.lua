@@ -1,7 +1,7 @@
 -- ============================================================
--- RezurXLib Example.client.lua — v5.3.1
+-- RezurXLib Example.client.lua — v5.8.1
 --
--- A tight worked example covering the full surface in <150 lines.
+-- A tight worked example covering the full surface in <170 lines.
 -- Drop this in a LocalScript under StarterPlayerScripts and put
 -- RezurXLib.lua as a ModuleScript named "RezurXLib" under
 -- ReplicatedStorage — OR run it in an executor with the loadstring
@@ -33,13 +33,13 @@ RezurXLib:RegisterTheme("Violet", {
 
 local Window = RezurXLib:CreateWindow({
     Name             = "Example Panel",
-    Subtitle         = "v5.3.1 demo",
+    Subtitle         = "v5.8.1 demo",
     LoadingTitle     = "EXAMPLE",
     LoadingEnabled   = true,
     Theme            = "Lava",                 -- Lava / Cyberpunk / Obsidian / Emerald / Quiet / Violet (above)
     ToggleUIKeybind  = Enum.KeyCode.K,
     Size             = { 520, 560 },
-    Icon             = "rbxassetid://4483362458",   -- number id / URI / emoji
+    Icon             = "rbxassetid://4483362458",   -- number id / URI / emoji (omit for the default gem mark)
     Activity         = "running",             -- "running" | "paused" — header beacon
     QuickPause       = function(paused)       -- called from minimized pill
         print("[Example] quick pause:", paused)
@@ -117,6 +117,18 @@ task.spawn(function()
         Grid:UpdateChip(rateChip, { Value = tostring(math.random(20, 80)) .. "/s" })
     end
 end)
+
+-- ── Profiles (v5.8): save / restore every flagged element ─────
+Main:CreateSection("Profiles")
+local Profiles = Main:CreateProfileManager({ Slots = { "A", "B", "C" } })
+Main:CreateButton({
+    Name     = "Snapshot to slot A",
+    Variant  = "Secondary",
+    Callback = function()
+        Profiles:Save("A")
+        Window:Notify({ Title = "Profile saved", Content = "Slot A updated.", Duration = 3 })
+    end,
+})
 
 -- ── Settings tab ──────────────────────────────────────────────
 Settings:CreateLabel("Tune the engine", nil, true)

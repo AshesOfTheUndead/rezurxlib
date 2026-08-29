@@ -1,10 +1,10 @@
 # 👑 RezurXLib
 
-**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.7.1 "Aurora".
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.8.1 "Lumen".
 
 > **Visual language attribution:** the chrome lineage crosses [Maclib](https://github.com/.../maclib) (MIT) and [Rayfield Gen 2](https://github.com/SiriusSoftwareLtd/rayfield-gen2) (MIT) idioms — the traffic-light window controls and the chip-measurement language are visual ports of their published UI idioms; v5.7 "Aurora" re-bases the window on a horizontal top tab strip with an image-first icon engine. Both references are MIT-licensed; every line here is original RezurXLib Luau implementing the visual spec — no verbatim source from either library.
 
-> **v5.7 "Aurora" highlights:** image-first icon engine with drawn-vector fallback (asset ids / URIs / http URLs / named glyphs, zero assets required) · customizable window backdrops (theme / image / gradient / aurora blobs) · net-image URL pipeline with executor filesystem cache · throw physics + edge snap on drag · input coexistence gate · **v5.7.1 advanced key system**: link providers (2x2 grid, capped 4), pluggable validation backends (static keys / custom function / HTTP endpoint), optional HWID binding, async redeem with busy state — plus a chat-safe input gate on every global key listener, vector check glyphs, content edge fades, restore-ball hover, and a CreateWindow register-overflow compile fix.
+> **v5.8.1 "Lumen" highlights:** soft-falloff 9-slice window shadow (with an offline-safe flat fallback) · the top accent line respects the corner radius (no more straight ledge past the curve) · the green traffic dot is a true minimize toggle with a state-aware chevron · multi-slot **profile system** (save/restore flag snapshots per slot) · **tab drag-reorder** · glass "Lumen" accents (living title sheen, breathing tab indicator, lit card edges, entrance bloom) · default vector icons for windows and tabs · double-click the header to minimize. Everything from v5.7.1 is still on board: image-first icon engine, backdrops, throw physics, advanced key system (providers / pluggable backends / HWID binding).
 
 ```lua
 local RezurXLib = loadstring(game:HttpGet(
@@ -147,10 +147,23 @@ local Window = RezurXLib:CreateWindow({
 | `:CreateStatus({ Title, Text, State?, Detail?, Value?, Flag? })` | `:Set`/`:Get` | Status indicator |
 | `:CreateGraph({ Name, Max?, Bars?, Height?, Suffix?, Sample?, RefreshRate?, Tooltip?, Flag? })` | `:Push`/`:Reset`/`:SetMax`/`:Get` | Live sparkline |
 | `:AddStatGrid({ Columns, UpdateRate?, ChipHeight?, Flag?, Tooltip? })` | `:AddChip`/`:UpdateChip`/`:RemoveChip`/`:GetChipCount` | Telemetry chips |
+| `:CreateProfileManager({ Slots? })` | `:Save`/`:Load` | **v5.8**: multi-slot flag snapshots (see below) |
 | `:CreateCodeBlock({ Title, Content, CopyCallback?, Height? })` | `:Set`/`:Get` | Monospace copyable |
 | `:CreateTable({ Title, Columns, Rows, OnRowActivated?, Height? })` | `:SetRows`/`:GetRows` | Compact data grid |
 
 Every component accepts an optional `Flag = "name"` to opt into `ConfigurationSaving`. Element objects support `:Set()` to programmatically update their state.
+
+### Profiles (v5.8)
+
+`tab:CreateProfileManager({ Slots = { "A", "B", "C" } })` renders a slot strip: each chip is a save slot with a "has data" dot. `:Save()` snapshots **every flagged element in the window** to `RezurXLib/Profiles/<window> [<slot>].rezx`; `:Load()` applies a snapshot back through the live callbacks. The same engine is on the window itself: `Window:SaveProfile(slot)` / `Window:LoadProfile(slot)`. Profiles ride the same atomic-write + corrupt-backup filesystem discipline as `ConfigurationSaving`.
+
+### Window chrome behavior
+
+- **Traffic lights** (top-right): amber = minimize to header pill, **green = minimize toggle** (also expands from the pill and restores from hidden — the chevron flips to point where the next click takes the window), red = hide to the floating restore ball.
+- **Double-click the header** to toggle minimize (v5.8.1).
+- **Drag tabs** to reorder them (v5.8).
+- The **top accent line** spans only the flat top edge — it starts and ends exactly where the 20px corner arcs begin, so it never pokes past the curve (v5.8.1).
+- The **window shadow** is a soft-falloff 9-slice by default; pass `ShadowImage = "rbxassetid://..."` for your own 9-slice-ready art. Offline executors fall back to a flat concentric shadow automatically.
 
 ---
 

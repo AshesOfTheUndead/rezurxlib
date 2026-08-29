@@ -1,4 +1,35 @@
 -- ============================================================
+-- [v5.7.1] KEY SYSTEM SHARED HELPERS (module scope).
+-- getHwid: best-effort device fingerprint for optional key<->HWID
+--   binding (executor gethwid() when present, LocalPlayer.UserId as a
+--   stable stand-in, "unknown" as a last resort). Never throws.
+-- readSavedKey: reads a previously accepted key from the executor
+--   filesystem. Understands BOTH the v5.7.1 JSON envelope
+--   { Key, Hwid, SavedAt } and the legacy raw-string saves written by
+--   every earlier version, so upgraded installs keep their saved keys.
+-- ============================================================
+local function getHwid()
+        local id = nil
+        pcall(function()
+                if type(gethwid) == "function" then id = gethwid() end
+        end)
+        if id == nil then
+                pcall(function() id = Players.LocalPlayer.UserId end)
+        end
+        return tostring(id or "unknown")
+end
+
+local function readSavedKey(path)
+        if not FS.available or not FS.exists(path) then return nil end
+        local ok, raw = FS.read(path)
+        if not ok or type(raw) ~= "string" or raw == "" then return nil end
+        local okJson, data = pcall(function() return HttpService:JSONDecode(raw) end)
+        if okJson and type(data) == "table" and type(data.Key) == "string" then
+                return data
+        end
+        return { Key = raw } -- legacy raw-string saves
+end
+
 function Library:CreateWindow(cfg)
         cfg = cfg or {}
         -- [v5.3.1] DIAGNOSTIC ENTRY BANNER. The most common consumer-side
@@ -170,10 +201,13 @@ function Library:CreateWindow(cfg)
         end
 
         -- ------------------------------------------------------------
-        -- [v4.0] KEY GATE PRE-CHECK — resolved BEFORE any visuals exist so
-        -- the entrance animation can be deferred until the gate is passed.
-        -- Pure logic + explicitly-opted-in file/HTTP reads; nothing runs
-        -- unless the developer sets KeySystem = true.
+        -- [v5.7.1] KEY GATE PRE-CHECK — resolved BEFORE any visuals exist
+        -- so the entrance animation can be deferred until the gate is
+        -- passed. Pure logic + explicitly-opted-in file/HTTP reads; nothing
+        -- runs unless the developer sets KeySystem = true.
+        -- Accepts THREE validation backends (first match wins at redeem
+        -- time): a static Keys whitelist, a custom Validate function, or
+        -- an HTTP Endpoint. Providers alone also enable the gate.
         -- ------------------------------------------------------------
         local keyGatePending = false
         local keyGateKeys = nil
@@ -181,6 +215,7 @@ function Library:CreateWindow(cfg)
         do
                 if cfg.KeySystem == true then
                         local ks = type(cfg.KeySettings) == "table" and cfg.KeySettings or {}
+                        local backend = type(ks.Backend) == "table" and ks.Backend or {}
                         local keys = {}
                         if type(ks.Key) == "string" and ks.Key ~= "" then
                                 keys = { ks.Key }
@@ -189,9 +224,14 @@ function Library:CreateWindow(cfg)
                                         if type(k) == "string" and k ~= "" then table.insert(keys, k) end
                                 end
                         end
-                        -- GrabKeyFromSite: fetch RAW key pages over HTTP (executor
-                        -- HttpGet). Explicit opt-in — the library itself never
-                        -- performs network operations otherwise.
+                        if type(backend.Keys) == "table" then
+                                for _, k in ipairs(backend.Keys) do
+                                        if type(k) == "string" and k ~= "" then table.insert(keys, k) end
+                                end
+                        end
+                        -- GrabKeyFromSite: fetch RAW key pages over HTTP
+                        -- (executor HttpGet). Explicit opt-in — the library
+                        -- itself never performs network operations otherwise.
                         if ks.GrabKeyFromSite == true then
                                 for i, k in ipairs(keys) do
                                         if string.sub(k, 1, 8) == "https://" or string.sub(k, 1, 7) == "http://" then
@@ -204,19 +244,22 @@ function Library:CreateWindow(cfg)
                                         end
                                 end
                         end
-                        if #keys == 0 then
-                                warn("[RezurXLib] KeySystem enabled but KeySettings.Key is empty — gate disabled")
+                        keySettingsRef = ks
+                        keyGateKeys = keys
+                        local hasBackend = #keys > 0
+                                or type(backend.Validate) == "function"
+                                or (type(backend.Endpoint) == "string" and backend.Endpoint ~= "")
+                                or (type(ks.Providers) == "table" and #ks.Providers > 0)
+                        if not hasBackend then
+                                warn("[RezurXLib] KeySystem enabled but no Keys, Backend, or Providers — gate disabled")
+                                keyGatePending = false
                         else
-                                keyGateKeys = keys
-                                keySettingsRef = ks
                                 local keyFile = "RezurXLib/Keys/" .. tostring(ks.FileName or "Key") .. ".rezx"
                                 local passed = false
-                                if ks.SaveKey ~= false and FS.available and FS.exists(keyFile) then
-                                        local ok, saved = FS.read(keyFile)
-                                        if ok and type(saved) == "string" then
-                                                for _, k in ipairs(keys) do
-                                                        if saved == k then passed = true break end
-                                                end
+                                if ks.SaveKey ~= false then
+                                        local saved = readSavedKey(keyFile)
+                                        if saved and type(saved.Key) == "string" and saved.Key ~= "" then
+                                                passed = backend.HwidLock ~= true or saved.Hwid == getHwid()
                                         end
                                 end
                                 keyGatePending = not passed
@@ -303,6 +346,22 @@ function Library:CreateWindow(cfg)
         -- the old broadcast behavior, where one interrupted touch could drive
         -- a window, slider, and color picker simultaneously.
         local activeDrag = nil
+        -- [v5.7.1] Declared up here (was deep in the keybind section) so the
+        -- INPUT COEXISTENCE GATE below can consult it from every handler.
+        local anyKeybindListening = false
+        -- [v5.7.0] INPUT COEXISTENCE GATE: true while any pointer drag
+        -- session is active, any keybind is mid-rebind capture, OR any
+        -- textbox (Roblox chat included) has focus. Global key listeners
+        -- (toggle key, Keybind, Bindable) consult this before firing
+        -- consumer callbacks, so the key you press to REBIND one control
+        -- can never simultaneously fire another control's binding — and
+        -- [v5.7.1] bindings now stay silent while the user is typing in
+        -- chat or any input field, closing the mid-chat misfire hole.
+        local function inputBusy()
+                return activeDrag ~= nil
+                        or anyKeybindListening
+                        or UserInputService:GetFocusedTextBox() ~= nil
+        end
         local function finishDrag(reason)
                 local session = activeDrag
                 activeDrag = nil
@@ -618,6 +677,35 @@ function Library:CreateWindow(cfg)
         local frameStroke = stroke(frame, C.borderAcc, 1.5)
         frameStroke.Transparency = 0.55
 
+        -- ------------------------------------------------------------
+        -- [v5.7.0 AURORA] WINDOW BACKDROP — a decorative layer INSIDE the
+        -- frame, behind all content (ZIndex 1, first child so sibling order
+        -- keeps it under the header/body/footer). Modes:
+        --   theme (default — plain window color, nothing extra rendered)
+        --   image    developer image + Dim overlay (+ optional slow Pan)
+        --   gradient ColorA -> ColorB with Rotation
+        --   aurora   two drifting accent blobs + sparse accent motes
+        -- cfg.Backdrop = { Mode, Image, Dim, ColorA, ColorB, Rotation, Pan }.
+        -- The controller exposes parallax (drag), settle (release), reveal
+        -- (entrance fade-in), and pulse (tab switch bloom).
+        -- ------------------------------------------------------------
+        local backdropPulse = function() end
+        local backdrop = createBackdrop(frame, C, reducedMotion, WindowJanitor, onTheme, function(fn)
+                backdropPulse = fn
+        end)
+        if type(cfg.Backdrop) == "table" then
+                pcall(function() backdrop:set(cfg.Backdrop) end)
+        end
+        --- Live backdrop configuration. Accepts the same shape as cfg.Backdrop.
+        --- @param bcfg table { Mode, Image, Dim, ColorA, ColorB, Rotation, Pan }
+        function Window:SetBackdrop(bcfg)
+                return backdrop:set(bcfg)
+        end
+        --- Snapshot of the current backdrop state.
+        function Window:GetBackdrop()
+                return backdrop:get()
+        end
+
         -- [v5.2.0] TOP EDGE ACCENT LINE: a 2px gradient strip across the very
         -- top border (accent -> secondary, e.g. orange->gold) that separates
         -- the window cleanly against bright game backgrounds. Stays visible
@@ -807,7 +895,11 @@ function Library:CreateWindow(cfg)
 
         -- Glow strip under the header — gradient refs captured for the
         -- theme system (gradients need direct updates, not re-creation).
-        -- (Declared above as a forward local; assigned here.)
+        -- [v5.7.1] The forward local went missing in the v5.7.0 refactor,
+        -- silently turning this into a GLOBAL — two windows shared one
+        -- strip and hiding one window toggled the other's glow. Same bug
+        -- class as the aurora motes leak.
+        local glowStrip
         glowStrip = Instance.new("Frame")
         glowStrip.Size = UDim2.new(1, 0, 0, 3)
         glowStrip.Position = UDim2.new(0, 0, 0, HEADER_H - 3)
@@ -1039,10 +1131,8 @@ function Library:CreateWindow(cfg)
         logo.Font = Enum.Font.GothamBold
         logo.TextSize = 18
         logo.TextColor3 = C.text
-        logo.TextStrokeColor3 = C.black
-        logo.TextStrokeTransparency = 0.84
-        logo.TextStrokeTransparency = 0.5
         logo.TextStrokeColor3 = Color3.new(0, 0, 0)
+        logo.TextStrokeTransparency = 0.5
         logo.TextXAlignment = Enum.TextXAlignment.Left
         logo.TextTruncate = Enum.TextTruncate.AtEnd
         logo.ZIndex = 5
@@ -1350,10 +1440,11 @@ function Library:CreateWindow(cfg)
                 -- AMBER = minimize (collapse to header). The returned dash
                 -- frame is captured as minGlyph so the existing Rotation
                 -- tween in setMinimized still operates (subtle hover flip).
-                local _
-                minBtn, _ = makeTrafficDot("MinDot",
+                -- [v5.7.1] named (was `local _` + read — lint noise).
+                local minDash
+                minBtn, minDash = makeTrafficDot("MinDot",
                         Color3.fromRGB(255, 192, 65), Color3.fromRGB(60, 40, 0), 1, "dash")
-                if _ then minGlyph = _ end
+                if minDash then minGlyph = minDash end
 
                 -- GREEN = restore / expand (un-minimize, un-hide)
                 toggleBtn = makeTrafficDot("ToggleDot",
@@ -1394,6 +1485,29 @@ function Library:CreateWindow(cfg)
         floatIcon.Parent = overlayGui
         corner(floatIcon, UDim.new(1, 0))
         stroke(floatIcon, C.white, 2)
+        -- [v5.7.1] Restore-ball hover treatment: a soft accent halo ring
+        -- blooms out from the ball and the face brightens — every other
+        -- control in the library has hover feedback; the floating restore
+        -- button was the last cold surface.
+        local floatRing = Instance.new("Frame")
+        floatRing.Name = "FloatRing"
+        floatRing.Size = UDim2.new(1, 10, 1, 10)
+        floatRing.Position = UDim2.new(0, -5, 0, -5)
+        floatRing.BackgroundColor3 = C.accent
+        floatRing.BackgroundTransparency = 1
+        floatRing.BorderSizePixel = 0
+        floatRing.ZIndex = 64
+        floatRing.Parent = floatIcon
+        corner(floatRing, UDim.new(1, 0))
+        floatIcon.MouseEnter:Connect(function()
+                Tween(floatIcon, T10, { BackgroundColor3 = C.accentHi })
+                Tween(floatRing, T15, { BackgroundTransparency = 0.75 })
+        end)
+        floatIcon.MouseLeave:Connect(function()
+                Tween(floatIcon, T10, { BackgroundColor3 = C.accent })
+                Tween(floatRing, T15, { BackgroundTransparency = 1 })
+        end)
+        onTheme(function() floatRing.BackgroundColor3 = C.accent end)
         local function applyRestoreText(nextText)
                 restoreText = limitBadgeText(nextText, brandText)
                 floatIcon.Text = restoreText
@@ -1511,12 +1625,103 @@ function Library:CreateWindow(cfg)
         dragBar.Selectable = false
         dragBar.Parent = header
 
+        -- ------------------------------------------------------------
+        -- [v5.7.0 AURORA] THROW PHYSICS + EDGE SNAP — the drag feels
+        -- physical instead of teleporting:
+        --   * velocity: 75/25 EMA of pointer deltas (px/s), sampled in the
+        --     drag move handler below
+        --   * release > 650 px/s: startFling() — a Heartbeat glide with
+        --     per-frame exponential decay (~0.985^60 per second) and edge
+        --     reflection at 55% restitution; below 40 px/s it hands off to
+        --     the edge snap
+        --   * release <= 650 px/s: edgeSnap() — windows resting inside the
+        --     28px snap zones dock to the nearest screen edge on a 180ms
+        --     quad-out slide
+        --   * every glide connection is owned by WindowJanitor and
+        --     cancelled on the next drag / teardown (cancelFling).
+        -- Reduced motion: instant snap, no glide, no tilt.
+        -- ------------------------------------------------------------
+        local TH = { vx = 0, vy = 0, lx = 0, ly = 0, lt = 0, snap = false, conn = nil }
+        local function cancelFling()
+                if TH.conn then
+                        TH.conn:Disconnect()
+                        TH.conn = nil
+                end
+        end
+        WindowJanitor:Add(cancelFling)
+
+        local function edgeSnap()
+                local vp = getViewport()
+                local p = frame.AbsolutePosition
+                local w = frame.AbsoluteSize.X
+                local gx, gy = p.X, p.Y
+                if p.X < 28 then gx = 8
+                elseif p.X > vp.X - 28 then gx = vp.X - w - 8 end
+                if p.Y < 28 then gy = 8 end
+                if gx == p.X and gy == p.Y then return end
+                if reducedMotion then
+                        moveWindowTo(gx, gy)
+                        return
+                end
+                cancelFling()
+                TH.snap = true
+                local px, py = p.X, p.Y
+                local t = 0
+                TH.conn = RunService.Heartbeat:Connect(function(dt)
+                        if not frame.Parent then cancelFling() return end
+                        t = t + dt
+                        local a = math.min(t / 0.18, 1)
+                        local e = 1 - (1 - a) * (1 - a) -- quad-out
+                        moveWindowTo(px + (gx - px) * e, py + (gy - py) * e)
+                        if a >= 1 then
+                                cancelFling()
+                                TH.snap = false
+                        end
+                end)
+        end
+
+        local function startFling()
+                cancelFling()
+                if reducedMotion then
+                        edgeSnap()
+                        return
+                end
+                local vp = getViewport()
+                TH.conn = RunService.Heartbeat:Connect(function(dt)
+                        if not frame.Parent then cancelFling() return end
+                        local speed = math.sqrt(TH.vx ^ 2 + TH.vy ^ 2)
+                        if speed < 40 then
+                                cancelFling()
+                                edgeSnap()
+                                return
+                        end
+                        local p = frame.AbsolutePosition
+                        local nx = p.X + TH.vx * dt
+                        local ny = p.Y + TH.vy * dt
+                        -- Edge reflection at 55% restitution keeps the glide
+                        -- on screen; the clamp position is the final word.
+                        if nx < 8 then nx = 8 TH.vx = -TH.vx * 0.55
+                        elseif nx > vp.X - 40 then nx = vp.X - 40 TH.vx = -TH.vx * 0.55 end
+                        if ny < 6 then ny = 6 TH.vy = -TH.vy * 0.55
+                        elseif ny > vp.Y - 40 then ny = vp.Y - 40 TH.vy = -TH.vy * 0.55 end
+                        local cx, cy = clampWindowPosition(nx, ny)
+                        moveWindowTo(cx, cy)
+                        local decay = 0.985 ^ (dt * 60)
+                        TH.vx = TH.vx * decay
+                        TH.vy = TH.vy * decay
+                end)
+        end
+
         WindowJanitor:Add(dragBar.InputBegan:Connect(function(inp)
                 if inp.UserInputType == Enum.UserInputType.MouseButton1
                         or inp.UserInputType == Enum.UserInputType.Touch then
                         local dragStart = inp.Position
                         local startAbs = frame.AbsolutePosition
                         local moved = false
+                        cancelFling()
+                        TH.vx, TH.vy = 0, 0
+                        TH.lx, TH.ly = inp.Position.X, inp.Position.Y
+                        TH.lt = os.clock()
                         if Window.Focus then Window:Focus() end
                         registerDrag("window", inp, function(pos)
                                 local d = pos - dragStart
@@ -1526,466 +1731,215 @@ function Library:CreateWindow(cfg)
                                         setShadowTransparency("lift")
                                         Tween(frameStroke, T15, { Transparency = 0.15 })
                                 end
+                                -- [v5.7.0] THROW PHYSICS: track pointer velocity on
+                                -- a 75/25 EMA (px/s). dt is wall-clock between move
+                                -- events; the 1ms floor skips duplicate-event noise.
+                                local now = os.clock()
+                                local dt = now - TH.lt
+                                if dt > 0.001 then
+                                        TH.vx = TH.vx * 0.75 + ((pos.X - TH.lx) / dt) * 0.25
+                                        TH.vy = TH.vy * 0.75 + ((pos.Y - TH.ly) / dt) * 0.25
+                                end
+                                TH.lx, TH.ly, TH.lt = pos.X, pos.Y, now
                                 local targetX, targetY = clampWindowPosition(startAbs.X + d.X, startAbs.Y + d.Y)
                                 moveWindowTo(targetX, targetY)
+                                -- [v5.7.0] EDGE-ZONE TILT: resting the pointer in a
+                                -- snap zone rolls the window a couple of degrees
+                                -- toward the edge it will dock to — physical
+                                -- foreshadowing, not decoration.
+                                local vp = getViewport()
+                                local inZone = pos.X < 28 or pos.X > vp.X - 28 or pos.Y < 28
+                                if inZone and not reducedMotion then
+                                        local tilt = pos.X < 28 and -2.5 or 2.5
+                                        if math.abs(tilt - frame.Rotation) > 0.05 then frame.Rotation = tilt end
+                                elseif not reducedMotion and frame.Rotation ~= 0 then
+                                        frame.Rotation = 0
+                                end
+                                -- [v5.7.0] BACKDROP PARALLAX: non-theme backdrops
+                                -- drift a few px against the drag direction.
+                                backdrop:parallax(d.X, d.Y)
                         end, function()
                                 setShadowTransparency("rest")
                                 Tween(frameStroke, T15, { Transparency = 0.55 })
+                                TH.snap = false
+                                backdrop:settle()
+                                if not reducedMotion then
+                                        Tween(frame, MT.enter, { Rotation = 0 })
+                                else
+                                        frame.Rotation = 0
+                                end
+                                -- [v5.7.0] RELEASE: a fast fling (>650 px/s) carries
+                                -- the window on a decaying glide with edge
+                                -- reflection; anything slower runs the edge snap.
+                                local speed = math.sqrt(TH.vx ^ 2 + TH.vy ^ 2)
+                                if not reducedMotion and speed > 650 then
+                                        startFling()
+                                else
+                                        edgeSnap()
+                                end
+                                TH.vx, TH.vy = 0, 0
                         end)
                 end
         end))
 
-        -- ------------------------------------------------------------
-        -- [v5.5.0 MAGMA] SIDEBAR NAVIGATION RAIL — Rayfield Gen2 × Maclib
-        -- cross. Tabs live in a VERTICAL rail on the left (Maclib sidebar
-        -- discipline) with Rayfield-style pill chips and a sliding edge-bar
-        -- selector carrying the lava gradient. Narrow/sheet windows collapse
-        -- the rail to an icon strip so phones keep their content width.
-        -- ------------------------------------------------------------
-        -- [v5.5.0] Forward-declared here: the sidebar's adaptive-mode helpers
-        -- and the chip-mode refresher close over Tabs/ActiveTab/
-        -- moveIndicatorTo, which gain their real values further below.
-        local Tabs = {}
-        local ActiveTab = nil
-        local moveIndicatorTo = function() end
-        local SIDEBAR_W = 156
-        local SIDEBAR_ICON_W = 54
-        -- [v5.6.0 MAGMA CROSS] Maclib sidebar discipline: a fixed header
-        -- card at the top of the rail (RezurX logo + wordmark + section
-        -- subtitle) and a fixed footer profile chip at the bottom. The
-        -- scrollable chip list sits between them. Both cards are children
-        -- of `body` (not the scrolling tabBar) so they stay pinned when
-        -- the user scrolls the rail — the macOS sidebar pattern.
-        local HEADER_CARD_H = 64
-        local FOOTER_CARD_H = 56
-        local sidebarIconMode = false
-        local tabBar = Instance.new("ScrollingFrame")
-        tabBar.Name = "TabRail"
-        tabBar.Size = UDim2.new(0, SIDEBAR_W, 1, -STATUSBAR_H - HEADER_CARD_H - FOOTER_CARD_H)
-        tabBar.Position = UDim2.new(0, 0, 0, HEADER_CARD_H)
-        tabBar.BackgroundColor3 = C.tabBarBg
-        tabBar.BorderSizePixel = 0
-        tabBar.ZIndex = 3
-        tabBar.ScrollingDirection = Enum.ScrollingDirection.Y
-        tabBar.CanvasSize = UDim2.new(0, 0, 0, 0)
-        tabBar.ScrollBarThickness = 3
+-- ------------------------------------------------------------
+-- [v5.7.0 AURORA] TOP TAB BAR — the navigation moves from the v5.6
+-- sidebar back to a horizontal rail under the header (Rayfield Gen2
+-- geometry × RezurX lava language). Measured chips scroll horizontally
+-- when they overflow; a spring-driven glow indicator (lava gradient
+-- core) slides beneath the active chip; rail-edge fades signal scroll.
+-- Content sits below the bar; the footer is unchanged.
+-- ------------------------------------------------------------
+-- Forward-declared here: the chip-mode refresher and indicator mover
+-- close over Tabs/ActiveTab/moveIndicatorTo, which gain their real
+-- values further below.
+local Tabs = {}
+local ActiveTab = nil
+local moveIndicatorTo = function() end
+-- TABBAR_H: the rail's fixed height. Chips are TABBAR_H - 10 tall
+-- (28px) with the 10px indicator glow tucked into the last 8px.
+local TABBAR_H = 38
+
+local tabBar = Instance.new("ScrollingFrame")
+tabBar.Name = "TabRail"
+tabBar.Size = UDim2.new(1, 0, 0, TABBAR_H)
+tabBar.Position = UDim2.new(0, 0, 0, 0)
+tabBar.BackgroundColor3 = C.tabBarBg
+tabBar.BorderSizePixel = 0
+tabBar.ZIndex = 3
+tabBar.ScrollingDirection = Enum.ScrollingDirection.X
+tabBar.CanvasSize = UDim2.new(0, 0, 1, 0)
+tabBar.ScrollBarThickness = 3
+tabBar.ScrollBarImageColor3 = C.accent
+tabBar.ScrollBarImageTransparency = 0.5
+tabBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+tabBar.ElasticBehavior = Enum.ElasticBehavior.Never
+tabBar.Parent = body
+local tabBarStroke = stroke(tabBar, C.border, 1)
+
+-- RAIL EDGE FADES: quiet gradients at both ends of the tab bar that
+-- deepen when the rail can scroll, so off-screen chips read as
+-- "more that way". Rest colors track the theme's tabBarBg.
+local railFadeL = Instance.new("Frame")
+railFadeL.Name = "RailFadeLeft"
+railFadeL.Size = UDim2.new(0, 26, 0, TABBAR_H)
+railFadeL.Position = UDim2.new(0, 0, 0, 0)
+railFadeL.BackgroundColor3 = C.tabBarBg
+railFadeL.BorderSizePixel = 0
+railFadeL.ZIndex = 6
+railFadeL.Parent = body
+local railFadeLGrad = gradient(railFadeL, ColorSequence.new(C.tabBarBg, C.tabBarBg), 0)
+railFadeLGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 1),
+})
+local railFadeR = railFadeL:Clone()
+railFadeR.Name = "RailFadeRight"
+railFadeR.Position = UDim2.new(1, -26, 0, 0)
+railFadeR.Parent = body
+railFadeR:FindFirstChildOfClass("UIGradient").Rotation = 180
+onTheme(function()
+        railFadeL.BackgroundColor3 = C.tabBarBg
+        railFadeR.BackgroundColor3 = C.tabBarBg
+end)
+
+-- The chip rail: an auto-width row container inside the scrolling bar.
+local tabRail = Instance.new("Frame")
+tabRail.Name = "TabRailRow"
+tabRail.Size = UDim2.new(0, 0, 1, 0)
+tabRail.Position = UDim2.fromOffset(4, 0)
+tabRail.AutomaticSize = Enum.AutomaticSize.X
+tabRail.BackgroundTransparency = 1
+tabRail.Parent = tabBar
+local tabLayout = Instance.new("UIListLayout")
+tabLayout.FillDirection = Enum.FillDirection.Horizontal
+tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+tabLayout.Padding = UDim.new(0, 6)
+tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+tabLayout.Parent = tabRail
+
+-- ACTIVE INDICATOR: a soft accent glow (10px) with a 4px lava-gradient
+-- core, sliding beneath the active chip on the spring solver. The glow
+-- reads as underlighting; the core carries the signature gradient.
+local tabIndicator = Instance.new("Frame")
+tabIndicator.Name = "ActiveIndicatorGlow"
+tabIndicator.Size = UDim2.new(0, 70, 0, 10)
+tabIndicator.Position = UDim2.new(0, 4, 0, TABBAR_H - 8)
+tabIndicator.BackgroundColor3 = C.accent
+tabIndicator.BackgroundTransparency = 0.88
+tabIndicator.BorderSizePixel = 0
+tabIndicator.ZIndex = 5
+tabIndicator.Parent = tabBar
+corner(tabIndicator, PILL)
+local tabIndCore = Instance.new("Frame")
+tabIndCore.Name = "ActiveIndicator"
+tabIndCore.Size = UDim2.new(1, 0, 0, 4)
+tabIndCore.Position = UDim2.new(0, 0, 0.5, -2)
+tabIndCore.BackgroundColor3 = C.accent
+tabIndCore.BorderSizePixel = 0
+tabIndCore.ZIndex = 6
+tabIndCore.Parent = tabIndicator
+corner(tabIndCore, PILL)
+local tabIndGrad = gradient(tabIndCore, ColorSequence.new{
+        ColorSequenceKeypoint.new(0.0, C.accentDim),
+        ColorSequenceKeypoint.new(0.5, C.accentHi),
+        ColorSequenceKeypoint.new(1.0, C.accentDim),
+}, 0)
+onTheme(function()
+        Tween(tabBar, T20, { BackgroundColor3 = C.tabBarBg })
         tabBar.ScrollBarImageColor3 = C.accent
-        tabBar.ScrollBarImageTransparency = 0.5
-        tabBar.AutomaticCanvasSize = Enum.AutomaticSize.Y
-        tabBar.ElasticBehavior = Enum.ElasticBehavior.Never
-        tabBar.Parent = body
-        local tabBarStroke = stroke(tabBar, C.border, 1)
-
-        -- [v5.6.0 MAGMA CROSS] SIDEBAR HEADER CARD — Maclib pattern: a
-        -- pinned card at the top of the rail with the RezurX logo mark,
-        -- the RezurX wordmark, and a section subtitle. The logo mark is a
-        -- fully-rounded square wearing the lava gradient (accent →
-        -- accentDark) with the white "R" letter centered — the RezurX
-        -- signature scaled down to sidebar size. Wordmark + subtitle
-        -- stack to its right so the eye reads logo → brand → section.
-        -- [v5.6.0 REGISTER BUDGET] All children are bundled into a single
-        -- `sh` table so the onTheme closure captures only 1 local (the
-        -- table) instead of 8+ child references. Field accesses (sh.card,
-        -- sh.logo, etc.) compile to table index ops — no register cost.
-        local sh = {}
-        sh.card = Instance.new("Frame")
-        sh.card.Name = "SidebarHeaderCard"
-        sh.card.Size = UDim2.new(0, SIDEBAR_W, 0, HEADER_CARD_H)
-        sh.card.Position = UDim2.new(0, 0, 0, 0)
-        sh.card.BackgroundColor3 = C.tabBarBg
-        sh.card.BorderSizePixel = 0
-        sh.card.ZIndex = 8
-        sh.card.Parent = body
-        corner(sh.card, R.outer)
-        sh.grad = gradient(sh.card, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.headerA),
-                ColorSequenceKeypoint.new(1.0, C.tabBarBg),
-        }, 90)
-        -- RezurX logo mark — lava gradient square with the "R" letter
-        sh.logo = Instance.new("Frame")
-        sh.logo.Name = "LogoMark"
-        sh.logo.Size = UDim2.fromOffset(28, 28)
-        sh.logo.AnchorPoint = Vector2.new(0, 0.5)
-        sh.logo.Position = UDim2.new(0, 12, 0.5, 0)
-        sh.logo.BackgroundColor3 = C.accentDark
-        sh.logo.BorderSizePixel = 0
-        sh.logo.ZIndex = 9
-        sh.logo.Parent = sh.card
-        corner(sh.logo, R.small)
-        sh.logoGrad = gradient(sh.logo, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.accent),
-                ColorSequenceKeypoint.new(1.0, C.accentDark),
-        }, 135)
-        sh.logoLetter = Instance.new("TextLabel")
-        sh.logoLetter.Name = "Letter"
-        sh.logoLetter.Size = UDim2.fromScale(1, 1)
-        sh.logoLetter.BackgroundTransparency = 1
-        sh.logoLetter.Font = Enum.Font.GothamBlack
-        sh.logoLetter.TextSize = 14
-        sh.logoLetter.TextColor3 = C.white
-        sh.logoLetter.Text = "R"
-        sh.logoLetter.TextXAlignment = Enum.TextXAlignment.Center
-        sh.logoLetter.TextYAlignment = Enum.TextYAlignment.Center
-        sh.logoLetter.ZIndex = 10
-        sh.logoLetter.Parent = sh.logo
-        -- RezurX wordmark + section subtitle stack to the right of the logo
-        sh.wordmark = Instance.new("TextLabel")
-        sh.wordmark.Name = "Wordmark"
-        sh.wordmark.Size = UDim2.new(1, -52, 0, 16)
-        sh.wordmark.Position = UDim2.new(0, 48, 0, 14)
-        sh.wordmark.BackgroundTransparency = 1
-        sh.wordmark.Font = Enum.Font.GothamBold
-        sh.wordmark.TextSize = 13
-        sh.wordmark.TextColor3 = C.text
-        sh.wordmark.TextXAlignment = Enum.TextXAlignment.Left
-        sh.wordmark.Text = "RezurX"
-        sh.wordmark.ZIndex = 9
-        sh.wordmark.Parent = sh.card
-        sh.section = Instance.new("TextLabel")
-        sh.section.Name = "Section"
-        sh.section.Size = UDim2.new(1, -52, 0, 13)
-        sh.section.Position = UDim2.new(0, 48, 0, 32)
-        sh.section.BackgroundTransparency = 1
-        sh.section.Font = Enum.Font.GothamMedium
-        sh.section.TextSize = 10
-        sh.section.TextColor3 = C.muted
-        sh.section.TextXAlignment = Enum.TextXAlignment.Left
-        sh.section.Text = subtitle
-        sh.section.TextTruncate = Enum.TextTruncate.AtEnd
-        sh.section.ZIndex = 9
-        sh.section.Parent = sh.card
-        -- [v5.6.0] Lava hairline at the bottom of the header card so it
-        -- reads as its own surface rather than a continuation of the rail.
-        sh.divider = Instance.new("Frame")
-        sh.divider.Name = "Divider"
-        sh.divider.Size = UDim2.new(1, 0, 0, 1)
-        sh.divider.Position = UDim2.new(0, 0, 1, -1)
-        sh.divider.BackgroundColor3 = C.accent
-        sh.divider.BackgroundTransparency = 0.82
-        sh.divider.BorderSizePixel = 0
-        sh.divider.ZIndex = 9
-        sh.divider.Parent = sh.card
-        onTheme(function()
-                Tween(sh.card, T20, { BackgroundColor3 = C.tabBarBg })
-                sh.grad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.headerA),
-                        ColorSequenceKeypoint.new(1.0, C.tabBarBg),
-                }
-                Tween(sh.logo, T20, { BackgroundColor3 = C.accentDark })
-                sh.logoGrad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.accent),
-                        ColorSequenceKeypoint.new(1.0, C.accentDark),
-                }
-                Tween(sh.logoLetter, T20, { TextColor3 = C.white })
-                Tween(sh.wordmark, T20, { TextColor3 = C.text })
-                Tween(sh.section, T20, { TextColor3 = C.muted })
-                Tween(sh.divider, T20, { BackgroundColor3 = C.accent })
-        end)
-
-        -- [v5.6.0 MAGMA CROSS] SIDEBAR FOOTER PROFILE CHIP — Maclib
-        -- pattern: a pinned card at the bottom of the rail with a RezurX
-        -- avatar dot, a RezurX wordmark, and a role label. The avatar is a
-        -- fully-rounded lava-gradient circle (the RezurX signature scaled
-        -- to profile size). The card sits above the status bar and stays
-        -- visible even when the rail is scrolled — a persistent brand
-        -- footer. [v5.6.0 REGISTER BUDGET] Same `sf` table pattern as the
-        -- header card — onTheme captures 1 local instead of 8.
-        local sf = {}
-        sf.card = Instance.new("Frame")
-        sf.card.Name = "SidebarFooterCard"
-        sf.card.Size = UDim2.new(0, SIDEBAR_W, 0, FOOTER_CARD_H)
-        sf.card.Position = UDim2.new(0, 0, 1, -(STATUSBAR_H + FOOTER_CARD_H))
-        sf.card.BackgroundColor3 = C.tabBarBg
-        sf.card.BorderSizePixel = 0
-        sf.card.ZIndex = 8
-        sf.card.Parent = body
-        corner(sf.card, R.outer)
-        sf.grad = gradient(sf.card, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.tabBarBg),
-                ColorSequenceKeypoint.new(1.0, C.headerB),
-        }, 90)
-        -- Top hairline accent (same lava language as the header card)
-        sf.divider = Instance.new("Frame")
-        sf.divider.Name = "Divider"
-        sf.divider.Size = UDim2.new(1, 0, 0, 1)
-        sf.divider.Position = UDim2.new(0, 0, 0, 0)
-        sf.divider.BackgroundColor3 = C.accent
-        sf.divider.BackgroundTransparency = 0.82
-        sf.divider.BorderSizePixel = 0
-        sf.divider.ZIndex = 9
-        sf.divider.Parent = sf.card
-        -- RezurX avatar dot (lava gradient circle)
-        sf.avatar = Instance.new("Frame")
-        sf.avatar.Name = "Avatar"
-        sf.avatar.Size = UDim2.fromOffset(24, 24)
-        sf.avatar.AnchorPoint = Vector2.new(0, 0.5)
-        sf.avatar.Position = UDim2.new(0, 12, 0.5, 0)
-        sf.avatar.BackgroundColor3 = C.accentDark
-        sf.avatar.BorderSizePixel = 0
-        sf.avatar.ZIndex = 9
-        sf.avatar.Parent = sf.card
-        corner(sf.avatar, UDim.new(1, 0))
-        sf.avatarGrad = gradient(sf.avatar, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.accent),
-                ColorSequenceKeypoint.new(1.0, C.secondary),
-        }, 135)
-        sf.avatarLetter = Instance.new("TextLabel")
-        sf.avatarLetter.Name = "Letter"
-        sf.avatarLetter.Size = UDim2.fromScale(1, 1)
-        sf.avatarLetter.BackgroundTransparency = 1
-        sf.avatarLetter.Font = Enum.Font.GothamBold
-        sf.avatarLetter.TextSize = 11
-        sf.avatarLetter.TextColor3 = C.white
-        sf.avatarLetter.Text = "R"
-        sf.avatarLetter.TextXAlignment = Enum.TextXAlignment.Center
-        sf.avatarLetter.TextYAlignment = Enum.TextYAlignment.Center
-        sf.avatarLetter.ZIndex = 10
-        sf.avatarLetter.Parent = sf.avatar
-        -- RezurX wordmark + role label stack to the right of the avatar
-        sf.name = Instance.new("TextLabel")
-        sf.name.Name = "Name"
-        sf.name.Size = UDim2.new(1, -52, 0, 14)
-        sf.name.Position = UDim2.new(0, 44, 0, 12)
-        sf.name.BackgroundTransparency = 1
-        sf.name.Font = Enum.Font.GothamBold
-        sf.name.TextSize = 11
-        sf.name.TextColor3 = C.text
-        sf.name.TextXAlignment = Enum.TextXAlignment.Left
-        sf.name.Text = "RezurX"
-        sf.name.ZIndex = 9
-        sf.name.Parent = sf.card
-        sf.role = Instance.new("TextLabel")
-        sf.role.Name = "Role"
-        sf.role.Size = UDim2.new(1, -52, 0, 12)
-        sf.role.Position = UDim2.new(0, 44, 0, 26)
-        sf.role.BackgroundTransparency = 1
-        sf.role.Font = Enum.Font.GothamMedium
-        sf.role.TextSize = 9
-        sf.role.TextColor3 = C.muted
-        sf.role.TextXAlignment = Enum.TextXAlignment.Left
-        sf.role.Text = "Control Center"
-        sf.role.ZIndex = 9
-        sf.role.Parent = sf.card
-        onTheme(function()
-                Tween(sf.card, T20, { BackgroundColor3 = C.tabBarBg })
-                sf.grad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.tabBarBg),
-                        ColorSequenceKeypoint.new(1.0, C.headerB),
-                }
-                Tween(sf.divider, T20, { BackgroundColor3 = C.accent })
-                Tween(sf.avatar, T20, { BackgroundColor3 = C.accentDark })
-                sf.avatarGrad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.accent),
-                        ColorSequenceKeypoint.new(1.0, C.secondary),
-                }
-                Tween(sf.avatarLetter, T20, { TextColor3 = C.white })
-                Tween(sf.name, T20, { TextColor3 = C.text })
-                Tween(sf.role, T20, { TextColor3 = C.muted })
-        end)
-
-        -- [v5.5.0] VERTICAL FADE MASKS: tabs that run past the rail's top or
-        -- bottom edge fade out smoothly instead of cutting off hard. Tinted
-        -- to the rail background; the TOP mask only shows once scrolled.
-        -- (Scoped: the masks are referenced only here and inside onTheme —
-        -- freeing their registers for the rest of this very large function.)
-        do
-                local tabFadeRight = Instance.new("Frame")
-                tabFadeRight.Name = "TabFadeBottom"
-                tabFadeRight.Size = UDim2.new(1, 0, 0, 22)
-                tabFadeRight.Position = UDim2.new(0, 0, 1, -22)
-                tabFadeRight.BackgroundColor3 = C.tabBarBg
-                tabFadeRight.BorderSizePixel = 0
-                tabFadeRight.ZIndex = 7
-                tabFadeRight.Parent = tabBar
-                local tabFadeRightGrad = Instance.new("UIGradient")
-                tabFadeRightGrad.Rotation = 90
-                tabFadeRightGrad.Transparency = NumberSequence.new({
-                        NumberSequenceKeypoint.new(0.0, 1.0),
-                        NumberSequenceKeypoint.new(1.0, 0.0),
-                })
-                tabFadeRightGrad.Parent = tabFadeRight
-                local tabFadeLeft = tabFadeRight:Clone()
-                tabFadeLeft.Name = "TabFadeTop"
-                tabFadeLeft.Position = UDim2.new(0, 0, 0, 0)
-                tabFadeLeft.BackgroundColor3 = C.tabBarBg
-                tabFadeLeft.ZIndex = 7
-                tabFadeLeft.Parent = tabBar
-                local tabFadeLeftGrad = tabFadeLeft:FindFirstChildOfClass("UIGradient")
-                tabFadeLeftGrad.Transparency = NumberSequence.new({
-                        NumberSequenceKeypoint.new(0.0, 0.0),
-                        NumberSequenceKeypoint.new(1.0, 1.0),
-                })
-                tabFadeLeft.Visible = false
-                tabBar:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-                        tabFadeLeft.Visible = tabBar.CanvasPosition.Y > 2
-                end)
-                onTheme(function()
-                        Tween(tabFadeRight, T20, { BackgroundColor3 = C.tabBarBg })
-                        Tween(tabFadeLeft, T20, { BackgroundColor3 = C.tabBarBg })
-                end)
-        end
-
-        local tabRail = Instance.new("Frame")
-        tabRail.Name = "TabList"
-        tabRail.Size = UDim2.new(1, -14, 0, 0)
-        tabRail.Position = UDim2.fromOffset(7, 10)
-        tabRail.AutomaticSize = Enum.AutomaticSize.Y
-        tabRail.BackgroundTransparency = 1
-        tabRail.Parent = tabBar
-        local tabLayout = Instance.new("UIListLayout")
-        tabLayout.FillDirection = Enum.FillDirection.Vertical
-        tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        tabLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-        tabLayout.Padding = UDim.new(0, 5)
-        tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        tabLayout.Parent = tabRail
-
-        -- [v5.5.0 MAGMA] The selector is a VERTICAL EDGE BAR on the rail's
-        -- left edge — a 3px lava-gradient core with a soft 5px glow backing,
-        -- both moving as ONE instance pair on ONE spring (interruptible,
-        -- momentum preserving). Rayfield's pill indicator, rotated Maclib.
-        local tabIndicator = Instance.new("Frame")
-        tabIndicator.Name = "ActiveIndicatorGlow"
-        tabIndicator.Size = UDim2.new(0, 5, 0, 30)
-        tabIndicator.Position = UDim2.new(0, 2, 0, 10)
-        tabIndicator.BackgroundColor3 = C.accent
-        tabIndicator.BackgroundTransparency = 0.86
-        tabIndicator.BorderSizePixel = 0
-        tabIndicator.ZIndex = 5
-        tabIndicator.Parent = tabBar
-        corner(tabIndicator, PILL)
-        local tabIndCore = Instance.new("Frame")
-        tabIndCore.Name = "ActiveIndicator"
-        tabIndCore.Size = UDim2.new(0, 3, 1, 0)
-        tabIndCore.Position = UDim2.new(0, 1, 0, 0)
-        tabIndCore.BackgroundColor3 = C.accent
-        tabIndCore.BorderSizePixel = 0
-        tabIndCore.ZIndex = 6
-        tabIndCore.Parent = tabIndicator
-        corner(tabIndCore, PILL)
-        local tabIndGrad = gradient(tabIndCore, ColorSequence.new{
-                ColorSequenceKeypoint.new(0.0, C.accent),
+        Tween(tabBarStroke, T20, { Color = C.border })
+        Tween(tabIndicator, T20, { BackgroundColor3 = C.accent })
+        Tween(tabIndCore, T20, { BackgroundColor3 = C.accent })
+        tabIndGrad.Color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0.0, C.accentDim),
                 ColorSequenceKeypoint.new(0.5, C.accentHi),
-                ColorSequenceKeypoint.new(1.0, C.secondary),
-        }, 90)
-        onTheme(function()
-                Tween(tabBar, T20, { BackgroundColor3 = C.tabBarBg })
-                tabBar.ScrollBarImageColor3 = C.accent
-                Tween(tabBarStroke, T20, { Color = C.border })
-                Tween(tabIndicator, T20, { BackgroundColor3 = C.accent })
-                Tween(tabIndCore, T20, { BackgroundColor3 = C.accent })
-                tabIndGrad.Color = ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.accent),
-                        ColorSequenceKeypoint.new(0.5, C.accentHi),
-                        ColorSequenceKeypoint.new(1.0, C.secondary),
-                }
-        end)
+                ColorSequenceKeypoint.new(1.0, C.accentDim),
+        }
+end)
 
-        local content = Instance.new("Frame")
-        content.Name = "Content"
-        content.Size = UDim2.new(1, -SIDEBAR_W, 1, -STATUSBAR_H)
-        content.Position = UDim2.new(0, SIDEBAR_W, 0, 0)
-        content.BackgroundTransparency = 1
-        content.Parent = body
+local content = Instance.new("Frame")
+content.Name = "Content"
+content.Size = UDim2.new(1, 0, 1, -(TABBAR_H + STATUSBAR_H))
+content.Position = UDim2.new(0, 0, 0, TABBAR_H)
+content.BackgroundTransparency = 1
+content.Parent = body
 
-        -- [v5.5.0] Lava hairline between rail and content: a 1px vertical
-        -- divider carrying the accent at whisper transparency — Rayfield's
-        -- separator detail in the library's signature gradient.
-        local tabDivider = Instance.new("Frame")
-        tabDivider.Name = "SidebarDivider"
-        tabDivider.Size = UDim2.new(0, 1, 1, -STATUSBAR_H)
-        tabDivider.Position = UDim2.new(0, SIDEBAR_W, 0, 0)
-        tabDivider.BackgroundColor3 = C.accent
-        tabDivider.BackgroundTransparency = 0.82
-        tabDivider.BorderSizePixel = 0
-        tabDivider.ZIndex = 4
-        tabDivider.Parent = body
-        do
-                local tabDividerGrad = gradient(tabDivider, ColorSequence.new{
-                        ColorSequenceKeypoint.new(0.0, C.accent),
-                        ColorSequenceKeypoint.new(0.45, C.secondary),
-                        ColorSequenceKeypoint.new(1.0, C.accent),
-                }, 90)
-                onTheme(function()
-                        Tween(tabDivider, T20, { BackgroundColor3 = C.accent })
-                        tabDividerGrad.Color = ColorSequence.new{
-                                ColorSequenceKeypoint.new(0.0, C.accent),
-                                ColorSequenceKeypoint.new(0.45, C.secondary),
-                                ColorSequenceKeypoint.new(1.0, C.accent),
-                        }
-                end)
-        end
+-- CONTENT EDGE FADES: the page scrolls under soft fades at the top and
+-- bottom of the content area (theme bg color) instead of hard-clipping
+-- against the tab bar and footer.
+local contentFadeT = Instance.new("Frame")
+contentFadeT.Name = "ContentFadeTop"
+contentFadeT.Size = UDim2.new(1, 0, 0, 14)
+contentFadeT.Position = UDim2.new(0, 0, 0, 0)
+contentFadeT.BackgroundColor3 = C.bg
+contentFadeT.BorderSizePixel = 0
+contentFadeT.ZIndex = 6
+contentFadeT.Parent = content
+local cftGrad = gradient(contentFadeT, ColorSequence.new(C.bg, C.bg), 90)
+cftGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0),
+        NumberSequenceKeypoint.new(1, 1),
+})
+local contentFadeB = Instance.new("Frame")
+contentFadeB.Name = "ContentFadeBottom"
+contentFadeB.Size = UDim2.new(1, 0, 0, 18)
+contentFadeB.Position = UDim2.new(0, 0, 1, -18)
+contentFadeB.BackgroundColor3 = C.bg
+contentFadeB.BorderSizePixel = 0
+contentFadeB.ZIndex = 6
+contentFadeB.Parent = content
+local cfbGrad = gradient(contentFadeB, ColorSequence.new(C.bg, C.bg), 90)
+cfbGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(1, 0),
+})
+onTheme(function()
+        contentFadeT.BackgroundColor3 = C.bg
+        contentFadeB.BackgroundColor3 = C.bg
+end)
 
-        -- [v5.5.0] Adaptive rail: sheet mode (phones) and narrow floating
-        -- windows collapse the sidebar to an icon strip so content keeps
-        -- its width. Chips restyle themselves (emoji-only labels, centered);
-        -- asset icons center; text-only chips shrink to quiet squares.
-        local function refreshTabChipModes()
-                for _, t in ipairs(Tabs) do
-                        local chip, lbl = t.Btn, t._textLbl
-                        local iconImg = t._tabIconImg
-                        if not chip or not chip.Parent or not lbl then continue end
-                        if sidebarIconMode then
-                                lbl.Text = t._iconText or ""
-                                lbl.TextXAlignment = Enum.TextXAlignment.Center
-                                lbl.Size = UDim2.new(1, 0, 1, 0)
-                                lbl.Position = UDim2.fromOffset(0, 0)
-                                if iconImg then
-                                        iconImg.Position = UDim2.new(0.5, -9, 0.5, -9)
-                                end
-                        else
-                                lbl.Text = t._fullLabel or ""
-                                lbl.TextXAlignment = Enum.TextXAlignment.Left
-                                if iconImg then
-                                        iconImg.Position = UDim2.new(0, 11, 0.5, -9)
-                                        lbl.Size = UDim2.new(1, -44, 1, 0)
-                                        lbl.Position = UDim2.fromOffset(38, 0)
-                                else
-                                        lbl.Size = UDim2.new(1, -20, 1, 0)
-                                        lbl.Position = UDim2.fromOffset(10, 0)
-                                end
-                        end
-                end
-        end
-        local function applySidebarMode()
-                local iconMode = sheetMode or WIN_W < 420
-                if iconMode == sidebarIconMode then return end
-                sidebarIconMode = iconMode
-                local w = iconMode and SIDEBAR_ICON_W or SIDEBAR_W
-                tabBar.Size = UDim2.new(0, w, 1, -STATUSBAR_H - HEADER_CARD_H - FOOTER_CARD_H)
-                content.Size = UDim2.new(1, -w, 1, -STATUSBAR_H)
-                content.Position = UDim2.new(0, w, 0, 0)
-                tabDivider.Position = UDim2.new(0, w, 0, 0)
-                -- [v5.6.0] Collapse the header card + footer profile chip too:
-                -- in icon mode the wordmark + section/role labels hide and
-                -- the logo mark + avatar dot center. The cards stay pinned.
-                sh.card.Size = UDim2.new(0, w, 0, HEADER_CARD_H)
-                sh.wordmark.Visible = not iconMode
-                sh.section.Visible = not iconMode
-                if iconMode then
-                        sh.logo.AnchorPoint = Vector2.new(0.5, 0.5)
-                        sh.logo.Position = UDim2.new(0.5, 0, 0.5, 0)
-                else
-                        sh.logo.AnchorPoint = Vector2.new(0, 0.5)
-                        sh.logo.Position = UDim2.new(0, 12, 0.5, 0)
-                end
-                sf.card.Size = UDim2.new(0, w, 0, FOOTER_CARD_H)
-                sf.name.Visible = not iconMode
-                sf.role.Visible = not iconMode
-                if iconMode then
-                        sf.avatar.AnchorPoint = Vector2.new(0.5, 0.5)
-                        sf.avatar.Position = UDim2.new(0.5, 0, 0.5, 0)
-                else
-                        sf.avatar.AnchorPoint = Vector2.new(0, 0.5)
-                        sf.avatar.Position = UDim2.new(0, 12, 0.5, 0)
-                end
-                refreshTabChipModes()
-                task.defer(function()
-                        if ActiveTab and ActiveTab.Btn and ActiveTab.Btn.Parent then
-                                moveIndicatorTo(ActiveTab.Btn, false)
-                        end
-                end)
-        end
 
         -- The footer owns a taller rounded surface. Its top rounding is above
         -- the visible bar, while its lower rounding precisely follows the
@@ -2236,8 +2190,6 @@ function Library:CreateWindow(cfg)
                 WIN_H = snapPx(h)
                 frame.Size = UDim2.new(0, WIN_W, 0, WIN_H)
                 applyShadowBox(WIN_W, WIN_H)
-                -- [v5.5.0] Manual resizes can cross the icon-rail threshold.
-                pcall(applySidebarMode)
         end
         updateLayout = function()
                 local vp = getViewport()
@@ -2254,9 +2206,6 @@ function Library:CreateWindow(cfg)
                         applyWindowSize(FLOAT_W, FLOAT_H)
                         if resizeHandle then resizeHandle.Visible = resizable end
                 end
-                -- [v5.5.0] Sheet-mode transitions and floating resizes both
-                -- re-evaluate the sidebar's icon-rail mode.
-                pcall(applySidebarMode)
                 if sheetMode then
                         -- Track viewport while pinned; handle stays hidden.
                         applyWindowSize(vp.X - 16, vp.Y - 110)
@@ -2288,6 +2237,9 @@ function Library:CreateWindow(cfg)
         -- "UI doesn't show up" regression ends here.
         if not keyGatePending then
                 pcall(function() task.spawn(runEntrance) end)
+                -- [v5.7.0] AURORA: non-theme backdrops fade their surfaces in
+                -- alongside the entrance instead of popping.
+                pcall(function() backdrop:reveal() end)
                 task.delay(1, function()
                         pcall(function()
                                 if not frame.Parent or not frame.Parent.Parent then return end
@@ -2449,12 +2401,16 @@ function Library:CreateWindow(cfg)
         nLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
         nLayout.Parent = notifContainer
 
-        local function notify(title, body_, duration, ntype, actions)
+        local function notify(title, body_, duration, ntype, actions, iconValue)
+                -- [v5.7.0] Icons render through the icon engine: each type maps
+                -- to a drawn vector glyph (info/check/warn/cross); callers can
+                -- pass their own icon (asset id / URI / registered name) via
+                -- Notify({ Icon = ... }) for a custom mark.
                 local NTYPES = {
-                        info    = { icon = "ℹ", color = C.accent },
-                        success = { icon = "✓", color = C.green },
-                        warning = { icon = "⚠", color = C.yellow },
-                        error   = { icon = "✕", color = C.red },
+                        info    = { icon = "info",    color = C.accent },
+                        success = { icon = "check",   color = C.green },
+                        warning = { icon = "warn",    color = C.yellow },
+                        error   = { icon = "cross",   color = C.red },
                 }
                 ntype = ntype or "info"
                 -- [FIX v4.0] Coerce duration: a string or other truthy non-number
@@ -2503,15 +2459,20 @@ function Library:CreateWindow(cfg)
                 iconF.ZIndex = 6
                 iconF.Parent = n
                 corner(iconF, R.small)
-                local iconLbl = Instance.new("TextLabel")
-                iconLbl.Size = UDim2.new(1, 0, 1, 0)
-                iconLbl.BackgroundTransparency = 1
-                iconLbl.Font = Enum.Font.GothamBold
-                iconLbl.TextSize = 13
-                iconLbl.TextColor3 = col
-                iconLbl.Text = ncfg.icon
-                iconLbl.ZIndex = 6
-                iconLbl.Parent = iconF
+                -- [v5.7.0] Drawn icon via the engine, spring-popped on entry
+                -- (reduced motion: appears at rest). A caller-supplied icon
+                -- wins; unknown values fall back to the type's glyph.
+                local iconCtl = makeIcon(iconF, iconValue or ncfg.icon, 14, col, { z = 6 })
+                iconCtl.Position = UDim2.new(0.5, 0, 0.5, 0)
+                local popScale = Instance.new("UIScale")
+                popScale.Scale = reducedMotion and 1 or 0.5
+                popScale.Parent = iconCtl
+                local notifyPopSpring = nil
+                notifyPopSpring = springTo(notifyPopSpring, iconCtl, 1, {
+                        from = reducedMotion and 1 or 0.5,
+                        stiffness = 320, damping = 16,
+                        apply = function(v) popScale.Scale = v end,
+                })
 
                 local ttl = Instance.new("TextLabel")
                 ttl.Size = UDim2.new(1, -50, 0, 17)
@@ -2656,10 +2617,10 @@ function Library:CreateWindow(cfg)
                 return n
         end
 
-        -- Table-form notification API: Window:Notify({Title, Content, Duration, Type})
+        -- Table-form notification API: Window:Notify({Title, Content, Duration, Type, Actions, Icon})
         function Window:Notify(ncfg)
                 ncfg = ncfg or {}
-                return notify(ncfg.Title, ncfg.Content, ncfg.Duration, ncfg.Type, ncfg.Actions)
+                return notify(ncfg.Title, ncfg.Content, ncfg.Duration, ncfg.Type, ncfg.Actions, ncfg.Icon)
         end
 
         -- ------------------------------------------------------------
@@ -2802,7 +2763,7 @@ function Library:CreateWindow(cfg)
         end)
         WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
                 if gp then return end
-                if inp.KeyCode == toggleKey and not UserInputService:GetFocusedTextBox() then
+                if inp.KeyCode == toggleKey and not inputBusy() then
                         setHidden(not hidden)
                 end
         end))
@@ -2974,24 +2935,23 @@ function Library:CreateWindow(cfg)
         local tabIndicatorSpring = nil
         moveIndicatorTo = function(btn, animated)
                 local scale = math.max(uiScale.Scale, 0.01)
-                local h = snapPx(btn.AbsoluteSize.Y / scale)
-                -- [v5.5.0] VERTICAL rail: convert the visible Y coordinate
-                -- back into the scrolling canvas coordinate so the edge bar
-                -- stays beside a tab even after the vertical rail has been
-                -- scrolled. X stays fixed: the bar always rides the rail's
-                -- left edge strip.
-                local relY = snapPx((btn.AbsolutePosition.Y - tabBar.AbsolutePosition.Y) / scale
-                        + tabBar.CanvasPosition.Y)
-                local goal = UDim2.new(0, 2, 0, relY)
-                local goalSize = UDim2.new(0, 5, 0, h)
+                local w = snapPx(btn.AbsoluteSize.X / scale)
+                -- [v5.7.0] HORIZONTAL rail: convert the visible X coordinate
+                -- back into the scrolling canvas coordinate so the indicator
+                -- stays beneath a tab even after the rail has been scrolled
+                -- horizontally. Y stays fixed at the bar's bottom strip.
+                local relX = snapPx((btn.AbsolutePosition.X - tabBar.AbsolutePosition.X) / scale
+                        + tabBar.CanvasPosition.X)
+                local goal = UDim2.new(0, relX, 0, TABBAR_H - 8)
+                local goalSize = UDim2.new(0, w, 0, 10)
                 if animated and not reducedMotion then
-                        -- [v5.0.0] SPRING: the bar glides with momentum.
+                        -- [v5.0.0] SPRING: the glow glides with momentum.
                         -- Flicking across tabs retargets mid-flight and the
                         -- velocity carries — interruptible by design.
-                        tabIndicatorSpring = springTo(tabIndicatorSpring, tabIndicator, relY, {
+                        tabIndicatorSpring = springTo(tabIndicatorSpring, tabIndicator, relX, {
                                 stiffness = 320, damping = 26,
                                 apply = function(v)
-                                        tabIndicator.Position = UDim2.new(0, 2, 0, snapPx(v))
+                                        tabIndicator.Position = UDim2.new(0, snapPx(v), 0, TABBAR_H - 8)
                                 end,
                         })
                         Tween(tabIndicator, MT.move, { Size = goalSize })
@@ -3009,37 +2969,33 @@ function Library:CreateWindow(cfg)
         -- callback if the key you pressed to rebind A happened to match B's
         -- current binding. This flag lets every Keybind check "is ANY keybind
         -- currently listening" before firing its own callback.
-        local anyKeybindListening = false
+        -- [v5.7.1] The declaration itself moved up beside activeDrag so the
+        -- shared inputBusy() gate (toggle key / Keybind / Bindable) sees the
+        -- SAME variable every closure reads — a duplicate here would have
+        -- shadowed it and silently split the gate in two.
 
         function Window:CreateTab(name, icon)
                 local tab = {}
                 local tabName = tostring(name or "Tab")
-                -- [v4.0] Tab icons accept three kinds of value, mirroring the
-                -- window icon: number asset ids and rbxasset/rbxthumb URIs
-                -- render as an ImageLabel; any other string stays emoji text.
-                local tabIconUri = nil
-                if type(icon) == "number" and icon ~= 0 then
-                        tabIconUri = "rbxassetid://" .. icon
-                elseif type(icon) == "string" and icon ~= "" then
-                        local lower = string.lower(icon)
-                        if string.sub(lower, 1, 13) == "rbxassetid://"
-                                or string.sub(lower, 1, 11) == "rbxasset://"
-                                or string.sub(lower, 1, 11) == "rbxthumb://" then
-                                tabIconUri = icon
-                        end
-                end
-                local iconText = (not tabIconUri) and (icon ~= nil and tostring(icon) or "") or ""
-
+                -- [v5.7.0] Tab icons resolve through the icon engine: number
+                -- asset ids, rbxasset/rbxthumb/http URIs, registered names,
+                -- and builtin glyph names all render via makeIcon; unknown
+                -- strings fall back to plain emoji text inside the label.
+                local hasIcon = icon ~= nil and icon ~= "" and resolveIcon(icon) ~= nil
                 local btn = Instance.new("TextButton")
                 btn.Name = "TabChip"
                 -- Each tab gets a dedicated title label: button input stays
                 -- independent from text rendering and works consistently on touch.
-                local btnText = iconText ~= "" and (iconText .. "  " .. tabName) or tabName
-                -- [v5.5.0 MAGMA] Vertical sidebar pill: fixed full-rail width,
-                -- 36px tall, fully rounded (Maclib row discipline × Rayfield
-                -- pill). No text measurement — the rail owns the width and
-                -- long titles truncate with an ellipsis like macOS sidebars.
-                btn.Size = UDim2.new(1, -4, 0, 36)
+                local btnText = tabName
+                -- [v5.7.0] HORIZONTAL chip: width is MEASURED from the title
+                -- (plus an icon lane when present), floored at 76px — chips
+                -- size to their content and the rail scrolls when they
+                -- overflow. Height fills the bar minus a 10px bottom strip
+                -- for the glow indicator.
+                local measured = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium,
+                        Vector2.new(1000, 24))
+                local tabWidth = math.max(76, math.ceil(measured.X) + 36 + (hasIcon and 26 or 0))
+                btn.Size = UDim2.new(0, tabWidth, 0, TABBAR_H - 10)
                 btn.BackgroundColor3 = C.tabChip
                 btn.AutoButtonColor = false
                 btn.BorderSizePixel = 0
@@ -3047,49 +3003,60 @@ function Library:CreateWindow(cfg)
                 btn.Text = ""
                 btn.ZIndex = 4
                 btn.Parent = tabRail
-                corner(btn, PILL)
+                corner(btn, R.tab)
+                -- [v5.7.0] Press feedback: the chip micro-scales on press like
+                -- every other control in the library.
+                local chipScale = Instance.new("UIScale")
+                chipScale.Scale = 1
+                chipScale.Parent = btn
+                btn.MouseButton1Down:Connect(function()
+                        Tween(chipScale, MT.press, { Scale = 0.96 })
+                end)
+                btn.MouseButton1Up:Connect(function()
+                        Tween(chipScale, MT.move, { Scale = 1 })
+                end)
+                btn.MouseLeave:Connect(function()
+                        Tween(chipScale, MT.move, { Scale = 1 })
+                end)
                 local chipStroke = stroke(btn, C.borderAcc, 1)
+                local chipGrad = gradient(btn, ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.white),
+                        ColorSequenceKeypoint.new(1.0, C.white),
+                }, 90)
                 -- [v5.2.0 CRITICAL FIX — PRESERVED] No identity-multiplying
                 -- gradient on the chip fill: the solid accent fill renders
-                -- exactly, on every theme, every time. [v5.5.0] The lava
-                -- signature lives on the EDGE BAR indicator (its own small
-                -- gradient instance) — never multiplied through the chip.
+                -- exactly, on every theme, every time. The lava signature
+                -- lives on the INDICATOR's core (its own small gradient
+                -- instance) — never multiplied through the chip.
                 -- Render tab text in a dedicated label. This is deliberately
                 -- separate from the button hit target so labels remain visible
                 -- on every client renderer and never compete with input.
                 local textLbl = Instance.new("TextLabel")
                 textLbl.Name = "Title"
-                textLbl.Size = UDim2.new(1, -20, 1, 0)
-                textLbl.Position = UDim2.fromOffset(10, 0)
+                textLbl.Size = UDim2.new(1, -16, 1, 0)
+                textLbl.Position = UDim2.fromOffset(8, 0)
                 textLbl.BackgroundTransparency = 1
                 -- [v5.2.0] ZIndex GUARANTEE: text and icons always render above
                 -- the chip fill and any indicator — the active highlight can
                 -- never cover them (the blank-active-tab bug).
-                textLbl.ZIndex = 7
+                textLbl.ZIndex = 5
                 textLbl.Active = false
                 textLbl.Font = Enum.Font.GothamMedium
                 textLbl.TextSize = 12
                 textLbl.TextColor3 = C.text
-                textLbl.TextXAlignment = Enum.TextXAlignment.Left
+                textLbl.TextXAlignment = Enum.TextXAlignment.Center
                 textLbl.TextStrokeTransparency = 0.5
                 textLbl.TextStrokeColor3 = Color3.new(0, 0, 0)
                 textLbl.TextTruncate = Enum.TextTruncate.AtEnd
                 textLbl.Text = btnText
                 textLbl.Parent = btn
-                -- [v4.0] Asset tab icon: an 18px image sits left of the title
-                -- (Rayfield-style), and the title label shifts right to fit.
-                local tabIconImg = nil
-                if tabIconUri then
-                        tabIconImg = Instance.new("ImageLabel")
-                        tabIconImg.Name = "TabIcon"
-                        tabIconImg.Size = UDim2.fromOffset(18, 18)
-                        tabIconImg.Position = UDim2.new(0, 11, 0.5, -9)
-                        tabIconImg.BackgroundTransparency = 1
-                        tabIconImg.Image = tabIconUri
-                        tabIconImg.ZIndex = 7 -- [v5.2.0] above the chip fill, always
-                        tabIconImg.Parent = btn
-                        textLbl.Position = UDim2.fromOffset(38, 0)
-                        textLbl.Size = UDim2.new(1, -44, 1, 0)
+                -- [v5.7.0] Icon lane: a drawn/engine icon sits left of the
+                -- title and the label shifts right to fit.
+                if hasIcon then
+                        local ic = makeIcon(btn, icon, 18, C.text, { z = 5 })
+                        ic.Position = UDim2.new(0, 18, 0.5, 0)
+                        textLbl.Position = UDim2.fromOffset(30, 0)
+                        textLbl.Size = UDim2.new(1, -38, 1, 0)
                 end
 
                 -- Page wrapper (a plain Frame, not CanvasGroup — CanvasGroup is
@@ -3124,22 +3091,21 @@ function Library:CreateWindow(cfg)
                 tab._pageGroup = pageGroup
                 tab.Btn = btn
                 tab.Name = tabName
+                tab._iconValue = icon
 
                 -- Update the rendered title and chip width together. Public setters
                 -- make late localisation and live workspace names safe without
                 -- sacrificing the measured, horizontally-scrollable tab rail.
                 local function applyTabTitle()
-                        btnText = iconText ~= "" and (iconText .. "  " .. tabName) or tabName
-                        -- [v5.5.0] The rail owns the chip width — retitling is a
-                        -- pure text swap (long titles ellipsize). Only the edge
-                        -- bar needs a re-snap if the active tab relabels.
-                        tab._fullLabel = btnText
-                        tab._iconText = iconText
-                        if not sidebarIconMode then
-                                textLbl.Text = btnText
-                        elseif iconText ~= "" then
-                                textLbl.Text = iconText
-                        end
+                        btnText = tabName
+                        textLbl.Text = btnText
+                        -- [v5.7.0] Width is measured from the title — retitling
+                        -- re-measures and resizes the chip; the indicator
+                        -- re-snaps if the active tab relabels.
+                        local newMeasure = TextService:GetTextSize(btnText, 12, Enum.Font.GothamMedium,
+                                Vector2.new(1000, 24))
+                        local newWidth = math.max(76, math.ceil(newMeasure.X) + 36 + (hasIcon and 26 or 0))
+                        btn.Size = UDim2.new(0, newWidth, 0, TABBAR_H - 10)
                         task.defer(function()
                                 if ActiveTab == tab and btn.Parent then
                                         moveIndicatorTo(btn, false)
@@ -3157,21 +3123,34 @@ function Library:CreateWindow(cfg)
                         return tabName
                 end
 
-                --- Change this tab's optional leading icon.
-                --- @param nextIcon any|nil Icon text, or nil to remove it.
-                --- @return string The applied icon text.
+                --- Change this tab's optional leading icon (asset id, URI,
+                --- registered name, or emoji text).
+                --- @param nextIcon any|nil New icon value, or nil to remove it.
+                --- @return any The applied icon value.
                 function tab:SetIcon(nextIcon)
-                        iconText = nextIcon ~= nil and tostring(nextIcon) or ""
+                        for _, d in ipairs(btn:GetChildren()) do
+                                if d.Name == "Icon" then d:Destroy() end
+                        end
+                        hasIcon = nextIcon ~= nil and nextIcon ~= "" and resolveIcon(nextIcon) ~= nil
+                        tab._iconValue = nextIcon
+                        if hasIcon then
+                                local ic = makeIcon(btn, nextIcon, 18, C.text, { z = 5 })
+                                ic.Position = UDim2.new(0, 18, 0.5, 0)
+                                textLbl.Position = UDim2.fromOffset(30, 0)
+                                textLbl.Size = UDim2.new(1, -38, 1, 0)
+                        else
+                                textLbl.Position = UDim2.fromOffset(8, 0)
+                                textLbl.Size = UDim2.new(1, -16, 1, 0)
+                        end
                         applyTabTitle()
-                        return iconText
+                        return nextIcon
                 end
 
-                        -- [FIX] updateBtnSize removed — btn uses AutomaticSize.X now
-                        -- Just move the indicator to the btn's current position on load
-                        task.defer(function()
-                                if ActiveTab == tab then
-                                        moveIndicatorTo(btn, false)
-                                end
+                -- Just move the indicator to the btn's current position on load
+                task.defer(function()
+                        if ActiveTab == tab then
+                                moveIndicatorTo(btn, false)
+                        end
                 end)
 
                 local function setActive(skipAnim)
@@ -3222,6 +3201,10 @@ function Library:CreateWindow(cfg)
                                 end
                                 local dir = (myIndex >= prevIndex) and 1 or -1
                                 traceLap(C.accent, 0.25 * dir)
+                                -- [v5.7.0] AURORA: the backdrop's blobs bloom
+                                -- briefly on every tab switch (aurora mode only;
+                                -- no-op on plain theme backdrops).
+                                pcall(backdropPulse)
                         end
                         -- CARD CASCADE (v5.0.0): the page rises 12px into place
                         -- while each card's stroke flashes accent on a stagger —
@@ -3263,9 +3246,7 @@ function Library:CreateWindow(cfg)
                 end
                 tab._chipStroke = chipStroke
                 tab._textLbl = textLbl
-                tab._tabIconImg = tabIconImg
-                tab._fullLabel = btnText
-                tab._iconText = iconText
+                tab._chipGrad = chipGrad
                 tab._setActive = setActive
 
                 onTheme(function()
@@ -3302,11 +3283,6 @@ function Library:CreateWindow(cfg)
                 end)
 
                 table.insert(Tabs, tab)
-                -- [v5.5.0] If the rail was already collapsed (narrow window
-                -- resolved its layout before this tab existed), restyle this
-                -- chip to icon mode immediately — must run AFTER the Tabs
-                -- insert above so the refresher can see this tab.
-                if sidebarIconMode then refreshTabChipModes() end
                 if #Tabs == 1 then
                         task.defer(function() setActive(true) end)
                 end
@@ -3334,6 +3310,45 @@ function Library:CreateWindow(cfg)
                                         ColorSequenceKeypoint.new(1, C.panel),
                                 })
                         end)
+                        -- [v5.7.0] HOVER SPOTLIGHT: a soft accent radial that
+                        -- tracks the pointer across the card surface (clipped
+                        -- to the card, theme-tinted, reduced-motion safe). The
+                        -- card reads as a lit surface instead of a flat rect.
+                        local spotMask = Instance.new("Frame")
+                        spotMask.Name = "SpotMask"
+                        spotMask.Size = UDim2.new(1, 0, 1, 0)
+                        spotMask.BackgroundTransparency = 1
+                        spotMask.ClipsDescendants = true
+                        spotMask.ZIndex = 1
+                        spotMask.Parent = holder
+                        corner(spotMask, R.panel)
+                        local spot = Instance.new("ImageLabel")
+                        spot.Name = "HoverSpot"
+                        spot.Size = UDim2.new(0, 190, 0, 190)
+                        spot.AnchorPoint = Vector2.new(0.5, 0.5)
+                        spot.BackgroundTransparency = 1
+                        spot.Image = "rbxassetid://1316045217"
+                        spot.ImageColor3 = C.accent
+                        spot.ImageTransparency = 1
+                        spot.ZIndex = 1
+                        spot.Parent = spotMask
+                        holder.InputChanged:Connect(function(inp)
+                                if inp.UserInputType == Enum.UserInputType.MouseMovement then
+                                        local p = holder.AbsolutePosition
+                                        spot.Position = UDim2.new(0, inp.Position.X - p.X, 0, inp.Position.Y - p.Y)
+                                end
+                        end)
+                        holder.InputBegan:Connect(function(inp)
+                                if inp.UserInputType == Enum.UserInputType.MouseMovement and not reducedMotion then
+                                        Tween(spot, T20, { ImageTransparency = 0.88 })
+                                end
+                        end)
+                        holder.InputEnded:Connect(function(inp)
+                                if inp.UserInputType == Enum.UserInputType.MouseMovement then
+                                        Tween(spot, T20, { ImageTransparency = 1 })
+                                end
+                        end)
+                        onTheme(function() spot.ImageColor3 = C.accent end)
                         -- [FIX v4.0] A tooltip showing on an element that gets
                         -- destroyed used to float ownerless until the next hover
                         -- somewhere else. Destroying is the reliable last beat.
@@ -3371,10 +3386,11 @@ function Library:CreateWindow(cfg)
                 end
 
                 -- ========================================================
-                -- [v4.0] ELEMENT ICONS — Rayfield-style asset support.
-                -- number          -> "rbxassetid://<n>"
-                -- "rbxassetid://…", "rbxasset://…", "rbxthumb://…" -> passthrough
-                -- any other string -> treated as emoji/text (no ImageLabel)
+                -- [v5.7.0] ELEMENT ICONS — through the icon engine.
+                -- number / asset URI / http URL / registered name / builtin
+                -- glyph name all render via makeIcon (images first, drawn
+                -- vector fallback). Unresolvable strings (emoji/text) render
+                -- nothing here and simply leave the label in place.
                 -- ========================================================
                 local function iconAssetUri(value)
                         if value == nil or value == 0 or value == "" then return nil end
@@ -3391,25 +3407,18 @@ function Library:CreateWindow(cfg)
                         return nil
                 end
 
-                -- Renders an icon ImageLabel at the left of an element and shifts
-                -- the element's text label right to make room. Returns the
-                -- ImageLabel (or nil when the value was emoji/text/absent).
+                -- Renders an icon at the left of an element and shifts the
+                -- element's text label right to make room. Returns the icon
+                -- container (or nil when the value was emoji/text/absent).
                 local function applyElementIcon(container, iconValue, label)
-                        local uri = iconAssetUri(iconValue)
-                        if not uri or not container then return nil end
-                        local iconInset = 14
-                        local img = Instance.new("ImageLabel")
-                        img.Name = "ElementIcon"
-                        img.Size = UDim2.fromOffset(18, 18)
+                        if iconValue == nil or iconValue == "" or not container then return nil end
+                        if resolveIcon(iconValue) == nil then return nil end
+                        local img = makeIcon(container, iconValue, 18, C.text, { z = 3 })
                         img.AnchorPoint = Vector2.new(0, 0.5)
-                        img.Position = UDim2.new(0, iconInset, 0.5, 0)
-                        img.BackgroundTransparency = 1
-                        img.Image = uri
-                        img.ZIndex = 3
-                        img.Parent = container
+                        img.Position = UDim2.new(0, 14, 0.5, 0)
                         if label then
                                 local pos = label.Position
-                                label.Position = UDim2.new(0, iconInset + 26, pos.Y.Scale, pos.Y.Offset)
+                                label.Position = UDim2.new(0, 40, pos.Y.Scale, pos.Y.Offset)
                                 local size = label.Size
                                 if size.X.Scale >= 1 then
                                         label.Size = UDim2.new(1, size.X.Offset - 26, size.Y.Scale, size.Y.Offset)
@@ -4669,15 +4678,21 @@ function Library:CreateWindow(cfg)
                         -- [v4.0] Optional asset icon (number id / rbx URI).
                         applyElementIcon(holder, dcfg.Icon, label)
 
-                        local arrow = Instance.new("TextLabel")
-                        arrow.Size = UDim2.fromOffset(20, 42)
-                        arrow.Position = UDim2.new(1, -27, 0, 0)
-                        arrow.BackgroundTransparency = 1
-                        arrow.Font = Enum.Font.GothamBold
-                        arrow.TextSize = 10
-                        arrow.TextColor3 = C.muted
-                        arrow.Text = "▾"
-                        arrow.Parent = holder
+                        -- [v5.7.0] Chevron via the icon engine (drawn vector).
+                        -- The icon ROTATES 180deg while the portal is open —
+                        -- pointing up — and settles back on close.
+                        local arrow = makeIcon(holder, "chevronDown", 18, C.muted, { z = 3 })
+                        arrow.Name = "Chevron"
+                        -- [v5.7.1] keep makeIcon's CENTER anchor: the 180deg
+                        -- open/close rotation spins in place around the
+                        -- chevron's own center instead of swinging around
+                        -- its top edge, and the glyph stays vertically
+                        -- centered in the row.
+                        arrow.Position = UDim2.new(1, -26, 0.5, 0)
+                        local function setArrowOpen(open)
+                                iconRotation(arrow, open and 180 or 0, TTOGGLE)
+                        end
+                        onTheme(function() recolorIcon(arrow, C.muted) end)
 
                         local hit = Instance.new("TextButton")
                         hit.Size = UDim2.fromScale(1, 1)
@@ -4747,7 +4762,7 @@ function Library:CreateWindow(cfg)
                                 end
                                 closeCurrentPopup()
                                 popupOpen = true
-                                arrow.Text = "▴"
+                                setArrowOpen(true)
 
                                 -- Holder geometry and the portal use physical
                                 -- screen pixels. The fallback retains the old
@@ -4857,14 +4872,13 @@ function Library:CreateWindow(cfg)
                                         itemLabel.ZIndex = 63
                                         itemLabel.Parent = item
 
-                                        local check = Instance.new("TextLabel")
-                                        check.Size = UDim2.fromOffset(px(20), px(rowHeight))
-                                        check.Position = UDim2.new(1, -px(26), 0, 0)
-                                        check.BackgroundTransparency = 1
-                                        check.Font = Enum.Font.GothamBold
-                                        check.TextSize = 13
-                                        check.TextColor3 = C.accent
-                                        check.Text = selected[index] and "✓" or ""
+                                        -- [v5.7.1] Drawn check glyph (was a "✓" TEXT
+                                        -- glyph — font-dependent, breaks the drawn-icon
+                                        -- language). Center-anchored, hidden until the
+                                        -- row is actually selected.
+                                        local check = makeIcon(item, "check", 12, C.accent, { z = 63 })
+                                        check.Position = UDim2.new(1, -px(20), 0.5, 0)
+                                        check.Visible = selected[index] == true
                                         check.ZIndex = 63
                                         check.Parent = item
                                         table.insert(views, {
@@ -4885,7 +4899,7 @@ function Library:CreateWindow(cfg)
                                                 item.Activated:Connect(function()
                                                         if multi then
                                                                 selected[index] = not selected[index] or nil
-                                                                check.Text = selected[index] and "✓" or ""
+                                                                check.Visible = selected[index] == true
                                                                 itemLabel.TextColor3 = selected[index] and C.accent or C.text
                                                                 refreshLabel()
                                                                 fire()
@@ -4990,7 +5004,7 @@ function Library:CreateWindow(cfg)
                                 popupJanitor:Add(listGroup, "Destroy")
                                 popupJanitor:Add(function()
                                         popupOpen = false
-                                        arrow.Text = "▾"
+                                        setArrowOpen(false)
                                 end)
                                 -- [FIX v4.0] Closing on ANY uiScale change made Searchable
                                 -- dropdowns unusable on phones: focusing the search box
@@ -5316,7 +5330,7 @@ function Library:CreateWindow(cfg)
                                 end
                                 if gp then return end
                                 if anyKeybindListening then return end -- a different keybind is being rebound right now
-                                if bound and inp.KeyCode == bound and not UserInputService:GetFocusedTextBox() then
+                                if bound and inp.KeyCode == bound and not inputBusy() then
                                         Tween(pill, TPRESS, { BackgroundColor3 = C.accentDim })
                                         task.delay(0.12, function()
                                                 if not listening then
@@ -5344,6 +5358,16 @@ function Library:CreateWindow(cfg)
                                 WindowJanitor:Add(UserInputService.InputEnded:Connect(function(inp)
                                         if bound and inp.KeyCode == bound and not listening then
                                                 if callback then
+                                                        -- [v5.7.1] This handler previously read `kbSurf` as a
+                                                        -- NIL GLOBAL — the local lived only inside the
+                                                        -- InputBegan closure and died with it, so hold-release
+                                                        -- callbacks lost their row-error-flash surface. Build
+                                                        -- the surface here too (fresh theme colors per event).
+                                                        local kbSurf = {
+                                                                frame = holder, label = lbl,
+                                                                name = "Keybind '" .. nameText .. "'",
+                                                                baseBg = C.panel, baseText = C.text,
+                                                        }
                                                         Library.SafeCallback(kbSurf, callback, false)
                                                 end
                                         end
@@ -5900,7 +5924,7 @@ function Library:CreateWindow(cfg)
                         WindowJanitor:Add(UserInputService.InputBegan:Connect(function(inp, gp)
                                 if gp then return end
                                 if not enabled then return end
-                                if UserInputService:GetFocusedTextBox() then return end
+                                if inputBusy() then return end
                                 if inp.KeyCode == bound and callback then
                                         Library.SafeCallback({
                                                 frame = holder, label = lbl,
@@ -8019,6 +8043,16 @@ function Library:CreateWindow(cfg)
                                         result.Parent = results
                                         corner(result, R.small)
                                         local resultStroke = stroke(result, C.border, 1)
+                                        -- [v5.7.1] Palette results carry the tab's own
+                                        -- icon (engine-rendered: asset / URL / glyph)
+                                        -- when one is configured, so scanning hits is
+                                        -- visual, not text-only.
+                                        if candidate._iconValue ~= nil and candidate._iconValue ~= ""
+                                                and resolveIcon(candidate._iconValue) then
+                                                local ric = makeIcon(result, candidate._iconValue, 14, C.textDim, { z = 74 })
+                                                ric.Position = UDim2.new(0, 26, 0.5, 0)
+                                                result.Text = "     " .. candidate.Name
+                                        end
                                         result.MouseEnter:Connect(function()
                                                 Tween(result, T10, { BackgroundColor3 = C.panelHov })
                                                 Tween(resultStroke, T10, { Color = C.accentDim })
@@ -8537,355 +8571,605 @@ function Library:CreateWindow(cfg)
         end
 
         -- ============================================================
-        -- [v4.0] KEY GATE UI — a styled unlock card in the library's own
-        -- design language (no external asset download, unlike Rayfield's
-        -- prebuilt ScreenGui). The window stays hidden until a valid key
-        -- is entered or a previously saved key matches.
+        -- [v5.7.1] ADVANCED KEY GATE — providers, pluggable backends,
+        -- HWID binding. Extracted into its own ctx-packed function both
+        -- for clarity AND to keep CreateWindow under Luau's 200-local
+        -- register ceiling (the old inline do-block was the straw that
+        -- tipped the function over — the whole bundle refused to compile).
         --
         --   KeySystem = true,
         --   KeySettings = {
-        --       Title = "Untitled", Subtitle = "Key System",
-        --       Note = "How to get a key…",
-        --       FileName = "Key",      -- saved under RezurXLib/Keys/
-        --       SaveKey = true,        -- remember accepted keys (default)
-        --       GrabKeyFromSite = false,
-        --       Key = {"Hello"},       -- string or list
-        --       MaxAttempts = 5,       -- 0 = unlimited
-        --       OnExhausted = "Lock",  -- "Lock" | "Kick" | "None"
+        --       Title, Subtitle, Note, FileName, SaveKey,
+        --       GrabKeyFromSite, Key (string|list),
+        --       RequireProviderVisit = false,  -- must copy a provider link first
+        --       Providers = { { Name, Url }, ... },  -- max 4, rendered 2x2
+        --       Backend = {
+        --           Keys = { "STATIC-KEY" },               -- static whitelist
+        --           Validate = function(key) end,          -- custom validator
+        --           Endpoint = "https://your.api/validate",-- HTTP backend
+        --           EndpointMethod = "POST",
+        --           EndpointHeaders = { ... },
+        --           EndpointBody = function(key, hwid) end,
+        --           EndpointParse = function(body, res) end,
+        --           HwidLock = true,                       -- bind key to device
+        --       },
+        --       MaxAttempts = 5, OnExhausted = "Lock" | "Kick" | "None",
         --   }
+        --
+        -- Validation chain at redeem time: custom Validate -> static
+        -- Keys -> HTTP Endpoint (first accept wins). Everything runs
+        -- async with a busy state so the card never freezes mid-check.
         -- ============================================================
-        do
-                if keyGatePending and keyGateKeys then
-                        local ks = keySettingsRef
-                        frame.Visible = false
-                        setShadowVisible(false)
+        local function buildKeyGate(ctx)
+                if not ctx.keyGatePending then return end
+                local ks = ctx.keySettingsRef or {}
+                local backend = type(ks.Backend) == "table" and ks.Backend or {}
+                local staticKeys = ctx.keyGateKeys or {}
+                local frame, overlayGui, C, R = ctx.frame, ctx.overlayGui, ctx.C, ctx.R
+                local WindowJanitor, FS = ctx.WindowJanitor, ctx.FS
+                local corner, stroke, pad, gradient, concentric = ctx.corner, ctx.stroke, ctx.pad, ctx.gradient, ctx.concentric
+                local Tween, T10, T20, MT = ctx.Tween, ctx.T10, ctx.T20, ctx.MT
+                local traceLap, playSfx, notify = ctx.traceLap, ctx.playSfx, ctx.notify
+                local runEntrance, setShadowVisible = ctx.runEntrance, ctx.setShadowVisible
+                local player, onTheme, windowName, Janitor = ctx.player, ctx.onTheme, ctx.windowName, ctx.Janitor
+                local keyFile = "RezurXLib/Keys/" .. tostring(ks.FileName or "Key") .. ".rezx"
+                local hwidLock = backend.HwidLock == true
+                local requireVisit = ks.RequireProviderVisit == true
 
-                        local gateJanitor = Janitor.new()
-                        WindowJanitor:Add(function() gateJanitor:Cleanup() end)
+                -- Providers, capped at 4 (2x2 grid). Accepts Name/Title and
+                -- Url/Link aliases; malformed entries are skipped silently.
+                local providers = {}
+                if type(ks.Providers) == "table" then
+                        for _, p in ipairs(ks.Providers) do
+                                if type(p) == "table" and (p.Name or p.Url or p.Link) then
+                                        table.insert(providers, {
+                                                Name = tostring(p.Name or p.Title or ("Provider " .. (#providers + 1))),
+                                                Url = tostring(p.Url or p.Link or ""),
+                                        })
+                                end
+                                if #providers >= 4 then break end
+                        end
+                end
+                local providerCount = #providers
+                local providerRows = math.ceil(providerCount / 2)
+                local providersBlock = providerCount > 0 and (8 + providerRows * 36) or 0
+                local inputY = 118 + providersBlock
+                local statusY = inputY + 46
+                local submitY = inputY + 72
+                local cardH = submitY + 58
 
-                        local dim = Instance.new("TextButton")
-                        dim.Name = "KeyGateDim"
-                        dim.Size = UDim2.fromScale(1, 1)
-                        dim.BackgroundColor3 = Color3.new(0, 0, 0)
-                        dim.BackgroundTransparency = 0.45
-                        dim.BorderSizePixel = 0
-                        dim.Text = ""
-                        dim.AutoButtonColor = false
-                        dim.ZIndex = 30
-                        dim.Parent = overlayGui
-                        gateJanitor:Add(dim, "Destroy")
+                frame.Visible = false
+                setShadowVisible(false)
 
-                        local card = Instance.new("Frame")
-                        card.Name = "KeyGate"
-                        card.Size = UDim2.fromOffset(364, 248)
-                        card.AnchorPoint = Vector2.new(0.5, 0.5)
-                        card.Position = UDim2.fromScale(0.5, 0.5)
-                        card.BackgroundColor3 = C.bg
-                        card.BorderSizePixel = 0
-                        card.ClipsDescendants = true
-                        card.ZIndex = 31
-                        card.Parent = overlayGui
-                        gateJanitor:Add(card, "Destroy")
-                        corner(card, R.outer)
-                        local cardStroke = stroke(card, C.borderAcc, 1.5)
-                        cardStroke.Transparency = 0.45
+                local gateJanitor = Janitor.new()
+                WindowJanitor:Add(function() gateJanitor:Cleanup() end)
 
-                        local cardGlow = Instance.new("Frame")
-                        cardGlow.Size = UDim2.new(1, 24, 1, 24)
-                        cardGlow.AnchorPoint = Vector2.new(0.5, 0.5)
-                        cardGlow.Position = UDim2.fromScale(0.5, 0.5)
-                        cardGlow.BackgroundColor3 = C.accent
-                        cardGlow.BackgroundTransparency = 0.93
-                        cardGlow.BorderSizePixel = 0
-                        cardGlow.ZIndex = 30
-                        cardGlow.Parent = overlayGui
-                        gateJanitor:Add(cardGlow, "Destroy")
-                        corner(cardGlow, concentric(R.outer, 12))
+                local dim = Instance.new("TextButton")
+                dim.Name = "KeyGateDim"
+                dim.Size = UDim2.fromScale(1, 1)
+                dim.BackgroundColor3 = Color3.new(0, 0, 0)
+                dim.BackgroundTransparency = 0.45
+                dim.BorderSizePixel = 0
+                dim.Text = ""
+                dim.AutoButtonColor = false
+                dim.ZIndex = 30
+                dim.Parent = overlayGui
+                gateJanitor:Add(dim, "Destroy")
 
-                        -- [v5.0.0] position-based entrance (no UIScale)
-                        card.Position = UDim2.new(0.5, 0, 0.5, 8)
-                        Tween(card, MT.enter, { Position = UDim2.new(0.5, 0, 0.5, 0) })
+                local card = Instance.new("Frame")
+                card.Name = "KeyGate"
+                card.Size = UDim2.fromOffset(364, cardH)
+                card.AnchorPoint = Vector2.new(0.5, 0.5)
+                card.Position = UDim2.fromScale(0.5, 0.5)
+                card.BackgroundColor3 = C.bg
+                card.BorderSizePixel = 0
+                card.ClipsDescendants = true
+                card.ZIndex = 31
+                card.Parent = overlayGui
+                gateJanitor:Add(card, "Destroy")
+                corner(card, R.outer)
+                local cardStroke = stroke(card, C.borderAcc, 1.5)
+                cardStroke.Transparency = 0.45
 
-                        local title = Instance.new("TextLabel")
-                        title.Size = UDim2.new(1, -48, 0, 24)
-                        title.Position = UDim2.fromOffset(24, 22)
-                        title.BackgroundTransparency = 1
-                        title.Font = Enum.Font.GothamBold
-                        title.TextSize = 17
-                        title.TextColor3 = C.text
-                        title.TextXAlignment = Enum.TextXAlignment.Left
-                        title.Text = tostring(ks.Title or windowName)
-                        title.ZIndex = 32
-                        title.Parent = card
+                local cardGlow = Instance.new("Frame")
+                cardGlow.Size = UDim2.new(1, 24, 1, 24)
+                cardGlow.AnchorPoint = Vector2.new(0.5, 0.5)
+                cardGlow.Position = UDim2.fromScale(0.5, 0.5)
+                cardGlow.BackgroundColor3 = C.accent
+                cardGlow.BackgroundTransparency = 0.93
+                cardGlow.BorderSizePixel = 0
+                cardGlow.ZIndex = 30
+                cardGlow.Parent = overlayGui
+                gateJanitor:Add(cardGlow, "Destroy")
+                corner(cardGlow, concentric(R.outer, 12))
 
-                        local gateSubtitle = Instance.new("TextLabel")
-                        gateSubtitle.Size = UDim2.new(1, -48, 0, 14)
-                        gateSubtitle.Position = UDim2.fromOffset(24, 47)
-                        gateSubtitle.BackgroundTransparency = 1
-                        gateSubtitle.Font = Enum.Font.GothamMedium
-                        gateSubtitle.TextSize = 10
-                        gateSubtitle.TextColor3 = C.muted
-                        gateSubtitle.TextXAlignment = Enum.TextXAlignment.Left
-                        gateSubtitle.Text = tostring(ks.Subtitle or "Key System")
-                        gateSubtitle.ZIndex = 32
-                        gateSubtitle.Parent = card
+                -- [v5.0.0] position-based entrance (no UIScale)
+                card.Position = UDim2.new(0.5, 0, 0.5, 8)
+                Tween(card, MT.enter, { Position = UDim2.new(0.5, 0, 0.5, 0) })
 
-                        local note = Instance.new("TextLabel")
-                        note.Size = UDim2.new(1, -48, 0, 40)
-                        note.Position = UDim2.fromOffset(24, 68)
-                        note.BackgroundTransparency = 1
-                        note.Font = Enum.Font.Gotham
-                        note.TextSize = 11
-                        note.TextColor3 = C.textDim
-                        note.TextXAlignment = Enum.TextXAlignment.Left
-                        note.TextYAlignment = Enum.TextYAlignment.Top
-                        note.TextWrapped = true
-                        note.Text = tostring(ks.Note or "No method of obtaining a key is provided.")
-                        note.ZIndex = 32
-                        note.Parent = card
+                local title = Instance.new("TextLabel")
+                title.Size = UDim2.new(1, -48, 0, 24)
+                title.Position = UDim2.fromOffset(24, 22)
+                title.BackgroundTransparency = 1
+                title.Font = Enum.Font.GothamBold
+                title.TextSize = 17
+                title.TextColor3 = C.text
+                title.TextXAlignment = Enum.TextXAlignment.Left
+                title.Text = tostring(ks.Title or windowName)
+                title.ZIndex = 32
+                title.Parent = card
 
-                        local inputBox = Instance.new("TextBox")
-                        inputBox.Size = UDim2.new(1, -48, 0, 40)
-                        inputBox.Position = UDim2.fromOffset(24, 118)
-                        inputBox.BackgroundColor3 = C.panelAlt
-                        inputBox.BorderSizePixel = 0
-                        inputBox.Font = Enum.Font.Gotham
-                        inputBox.TextSize = 13
-                        inputBox.TextColor3 = C.text
-                        inputBox.PlaceholderColor3 = C.muted
-                        inputBox.PlaceholderText = "Enter key…"
-                        inputBox.Text = ""
-                        inputBox.ClearTextOnFocus = false
-                        inputBox.TextXAlignment = Enum.TextXAlignment.Left
-                        inputBox.ClipsDescendants = true
-                        inputBox.ZIndex = 32
-                        inputBox.Parent = card
-                        corner(inputBox, R.control)
-                        local inputStroke = stroke(inputBox, C.border, 1)
-                        pad(inputBox, 0, 0, 12, 12)
+                local gateSubtitle = Instance.new("TextLabel")
+                gateSubtitle.Size = UDim2.new(1, -48, 0, 14)
+                gateSubtitle.Position = UDim2.fromOffset(24, 47)
+                gateSubtitle.BackgroundTransparency = 1
+                gateSubtitle.Font = Enum.Font.GothamMedium
+                gateSubtitle.TextSize = 10
+                gateSubtitle.TextColor3 = C.muted
+                gateSubtitle.TextXAlignment = Enum.TextXAlignment.Left
+                gateSubtitle.Text = tostring(ks.Subtitle or "Key System")
+                gateSubtitle.ZIndex = 32
+                gateSubtitle.Parent = card
 
-                        local attemptsMax = tonumber(ks.MaxAttempts)
-                        if attemptsMax == nil then attemptsMax = 5 end
-                        local attemptsLeft = attemptsMax
-                        local status = Instance.new("TextLabel")
-                        status.Size = UDim2.new(1, -48, 0, 14)
-                        status.Position = UDim2.fromOffset(24, 164)
-                        status.BackgroundTransparency = 1
-                        status.Font = Enum.Font.GothamMedium
-                        status.TextSize = 10
-                        status.TextColor3 = C.muted
-                        status.TextXAlignment = Enum.TextXAlignment.Left
-                        status.Text = attemptsMax > 0 and ("Attempts remaining: " .. attemptsLeft) or "Unlimited attempts"
-                        status.ZIndex = 32
-                        status.Parent = card
+                local note = Instance.new("TextLabel")
+                note.Size = UDim2.new(1, -48, 0, 36)
+                note.Position = UDim2.fromOffset(24, 66)
+                note.BackgroundTransparency = 1
+                note.Font = Enum.Font.Gotham
+                note.TextSize = 11
+                note.TextColor3 = C.textDim
+                note.TextXAlignment = Enum.TextXAlignment.Left
+                note.TextYAlignment = Enum.TextYAlignment.Top
+                note.TextWrapped = true
+                note.Text = tostring(ks.Note or "No method of obtaining a key is provided.")
+                note.ZIndex = 32
+                note.Parent = card
 
-                        local submit = Instance.new("TextButton")
-                        submit.Size = UDim2.new(1, -48, 0, 38)
-                        submit.Position = UDim2.fromOffset(24, 190)
-                        submit.BackgroundColor3 = C.accentDark
-                        submit.Text = ""
-                        submit.AutoButtonColor = false
-                        submit.BorderSizePixel = 0
-                        submit.Selectable = true
-                        submit.ZIndex = 32
-                        submit.Parent = card
-                        corner(submit, R.control)
-                        local submitStroke = stroke(submit, C.accentDim, 1)
-                        local submitGrad = gradient(submit, ColorSequence.new{
-                                ColorSequenceKeypoint.new(0.0, C.accentDim),
-                                ColorSequenceKeypoint.new(1.0, C.accentDark),
-                        }, 100)
-                        local submitLbl = Instance.new("TextLabel")
-                        submitLbl.Size = UDim2.fromScale(1, 1)
-                        submitLbl.BackgroundTransparency = 1
-                        submitLbl.Font = Enum.Font.GothamBold
-                        submitLbl.TextSize = 13
-                        submitLbl.TextColor3 = C.accentHi
-                        submitLbl.Text = "Unlock"
-                        submitLbl.ZIndex = 33
-                        submitLbl.Parent = submit
+                -- PROVIDERS GRID (STEP 1): each button copies its link to the
+                -- clipboard and flips to a check when visited. The first
+                -- visit also unlocks the RequireProviderVisit gate.
+                local visited = {}
+                local visitCount = 0
+                if providerCount > 0 then
+                        local provLbl = Instance.new("TextLabel")
+                        provLbl.Size = UDim2.new(1, -48, 0, 12)
+                        provLbl.Position = UDim2.fromOffset(24, 106)
+                        provLbl.BackgroundTransparency = 1
+                        provLbl.Font = Enum.Font.GothamBold
+                        provLbl.TextSize = 9
+                        provLbl.TextColor3 = C.accent
+                        provLbl.TextXAlignment = Enum.TextXAlignment.Left
+                        provLbl.Text = "STEP 1 — COPY A PROVIDER LINK, COMPLETE IT"
+                        provLbl.ZIndex = 32
+                        provLbl.Parent = card
+                        for i = 1, providerCount do
+                                local prov = providers[i]
+                                local col = (i - 1) % 2
+                                local row = math.floor((i - 1) / 2)
+                                local pBtn = Instance.new("TextButton")
+                                pBtn.Size = UDim2.new(0, 155, 0, 30)
+                                pBtn.Position = UDim2.new(0, 24 + col * 161, 0, 124 + row * 36)
+                                pBtn.BackgroundColor3 = C.panelAlt
+                                pBtn.Text = ""
+                                pBtn.AutoButtonColor = false
+                                pBtn.BorderSizePixel = 0
+                                pBtn.Selectable = false
+                                pBtn.ZIndex = 32
+                                pBtn.Parent = card
+                                corner(pBtn, R.small)
+                                local pStroke = stroke(pBtn, C.border, 1)
+                                local pName = Instance.new("TextLabel")
+                                pName.Size = UDim2.new(1, -34, 1, 0)
+                                pName.Position = UDim2.new(0, 10, 0, 0)
+                                pName.BackgroundTransparency = 1
+                                pName.Font = Enum.Font.GothamMedium
+                                pName.TextSize = 11
+                                pName.TextColor3 = C.text
+                                pName.TextXAlignment = Enum.TextXAlignment.Left
+                                pName.TextTruncate = Enum.TextTruncate.AtEnd
+                                pName.Text = prov.Name
+                                pName.ZIndex = 33
+                                pName.Parent = pBtn
+                                local pIcon = makeIcon(pBtn, "copy", 12, C.muted, { z = 33 })
+                                pIcon.Position = UDim2.new(1, -16, 0.5, 0)
+                                pBtn.MouseEnter:Connect(function()
+                                        Tween(pBtn, T10, { BackgroundColor3 = C.panelHov })
+                                end)
+                                pBtn.MouseLeave:Connect(function()
+                                        Tween(pBtn, T10, { BackgroundColor3 = C.panelAlt })
+                                end)
+                                pBtn.Activated:Connect(function()
+                                        local url = prov.Url
+                                        local copied = false
+                                        if url ~= "" and type(setclipboard) == "function" then
+                                                copied = pcall(setclipboard, url)
+                                        end
+                                        if not visited[i] then
+                                                visited[i] = true
+                                                visitCount = visitCount + 1
+                                        end
+                                        Tween(pStroke, T10, { Color = C.accent })
+                                        if pIcon.Parent then pIcon:Destroy() end
+                                        local doneIcon = makeIcon(pBtn, "check", 12, C.accent, { z = 33 })
+                                        doneIcon.Position = UDim2.new(1, -16, 0.5, 0)
+                                        playSfx("Confirm")
+                                        notify(prov.Name,
+                                                copied and "Link copied — finish it in your browser, then redeem your key."
+                                                        or (url ~= "" and url or "No link configured for this provider."),
+                                                6, "info")
+                                end)
+                        end
+                end
 
-                        local gateResolved = false
-                        local function shakeCard()
+                -- HWID CHIP: when HwidLock is on, the device id is shown
+                -- (truncated) and tappable to copy — the user needs it to
+                -- request a key bound to their machine.
+                if hwidLock then
+                        local hwid = getHwid()
+                        local hwBtn = Instance.new("TextButton")
+                        hwBtn.Size = UDim2.new(0, 96, 0, 18)
+                        hwBtn.Position = UDim2.new(1, -24, 0, statusY - 1)
+                        hwBtn.BackgroundColor3 = C.panelAlt
+                        hwBtn.Text = ""
+                        hwBtn.AutoButtonColor = false
+                        hwBtn.BorderSizePixel = 0
+                        hwBtn.Selectable = false
+                        hwBtn.ZIndex = 32
+                        hwBtn.Parent = card
+                        corner(hwBtn, PILL)
+                        stroke(hwBtn, C.border, 1)
+                        local hwLbl = Instance.new("TextLabel")
+                        hwLbl.Size = UDim2.new(1, -8, 1, 0)
+                        hwLbl.Position = UDim2.new(0, 6, 0, 0)
+                        hwLbl.BackgroundTransparency = 1
+                        hwLbl.Font = Enum.Font.Code
+                        hwLbl.TextSize = 9
+                        hwLbl.TextColor3 = C.muted
+                        hwLbl.TextXAlignment = Enum.TextXAlignment.Left
+                        hwLbl.Text = "HWID " .. string.sub(hwid, 1, 8)
+                        hwLbl.ZIndex = 33
+                        hwLbl.Parent = hwBtn
+                        hwBtn.Activated:Connect(function()
+                                local copied = false
+                                if type(setclipboard) == "function" then
+                                        copied = pcall(setclipboard, hwid)
+                                end
+                                playSfx("Confirm")
+                                notify("Hardware ID", copied and "HWID copied." or hwid, 4, "info")
+                        end)
+                end
+
+                -- KEY INPUT
+                local inputBox = Instance.new("TextBox")
+                inputBox.Size = UDim2.new(1, -48, 0, 40)
+                inputBox.Position = UDim2.fromOffset(24, inputY)
+                inputBox.BackgroundColor3 = C.panelAlt
+                inputBox.BorderSizePixel = 0
+                inputBox.Font = Enum.Font.Gotham
+                inputBox.TextSize = 13
+                inputBox.TextColor3 = C.text
+                inputBox.PlaceholderColor3 = C.muted
+                inputBox.PlaceholderText = "Paste your key and redeem…"
+                inputBox.Text = ""
+                inputBox.ClearTextOnFocus = false
+                inputBox.TextXAlignment = Enum.TextXAlignment.Left
+                inputBox.ClipsDescendants = true
+                inputBox.ZIndex = 32
+                inputBox.Parent = card
+                corner(inputBox, R.control)
+                local inputStroke = stroke(inputBox, C.border, 1)
+                pad(inputBox, 0, 0, 12, 12)
+
+                local attemptsMax = tonumber(ks.MaxAttempts) or 5
+                local attemptsLeft = attemptsMax
+                local status = Instance.new("TextLabel")
+                status.Size = UDim2.new(1, hwidLock and -128 or -48, 0, 14)
+                status.Position = UDim2.fromOffset(24, statusY)
+                status.BackgroundTransparency = 1
+                status.Font = Enum.Font.GothamMedium
+                status.TextSize = 10
+                status.TextColor3 = C.muted
+                status.TextXAlignment = Enum.TextXAlignment.Left
+                status.Text = attemptsMax > 0 and ("Attempts remaining: " .. attemptsLeft) or "Unlimited attempts"
+                status.ZIndex = 32
+                status.Parent = card
+                local function setStatus(text, color)
+                        status.Text = text
+                        status.TextColor3 = color or C.muted
+                end
+
+                -- REDEEM BUTTON
+                local submit = Instance.new("TextButton")
+                submit.Size = UDim2.new(1, -48, 0, 38)
+                submit.Position = UDim2.fromOffset(24, submitY)
+                submit.BackgroundColor3 = C.accentDark
+                submit.Text = ""
+                submit.AutoButtonColor = false
+                submit.BorderSizePixel = 0
+                submit.Selectable = false
+                submit.ZIndex = 32
+                submit.Parent = card
+                corner(submit, R.control)
+                local submitStroke = stroke(submit, C.accentDim, 1)
+                local submitGrad = gradient(submit, ColorSequence.new{
+                        ColorSequenceKeypoint.new(0.0, C.accentDim),
+                        ColorSequenceKeypoint.new(1.0, C.accentDark),
+                }, 100)
+                local submitLbl = Instance.new("TextLabel")
+                submitLbl.Size = UDim2.fromScale(1, 1)
+                submitLbl.BackgroundTransparency = 1
+                submitLbl.Font = Enum.Font.GothamBold
+                submitLbl.TextSize = 13
+                submitLbl.TextColor3 = C.accentHi
+                submitLbl.Text = "Redeem Key"
+                submitLbl.ZIndex = 33
+                submitLbl.Parent = submit
+
+                local gateResolved = false
+                local locked = false
+                local busy = false
+                local function shakeCard()
+                        Tween(card, TweenInfo.new(0.09, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
+                                { Position = UDim2.new(0.5, -7, 0.5, 0) })
+                        task.delay(0.09, function()
                                 Tween(card, TweenInfo.new(0.09, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
-                                        { Position = UDim2.new(0.5, -7, 0.5, 0) })
-                                task.delay(0.09, function()
-                                        Tween(card, TweenInfo.new(0.09, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out),
-                                                { Position = UDim2.new(0.5, 7, 0.5, 0) })
-                                end)
-                                task.delay(0.18, function()
-                                        Tween(card, TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out),
-                                                { Position = UDim2.fromScale(0.5, 0.5) })
-                                end)
-                        end
+                                        { Position = UDim2.new(0.5, 7, 0.5, 0) })
+                        end)
+                        task.delay(0.18, function()
+                                Tween(card, TweenInfo.new(0.22, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out),
+                                        { Position = UDim2.fromScale(0.5, 0.5) })
+                        end)
+                end
 
-                        local function resolveGate(matchedKey)
-                                if gateResolved then return end
-                                gateResolved = true
-                                if ks.SaveKey ~= false and matchedKey and FS.available then
-                                        FS.ensureFolder("RezurXLib/Keys")
-                                        local keyFile = "RezurXLib/Keys/" .. tostring(ks.FileName or "Key") .. ".rezx"
-                                        FS.write(keyFile, matchedKey)
-                                end
-                                -- [v5.1.0] STEP UNLOCK SEQUENCE (spec): verification
-                                -- steps light up with glowing checkmarks one by one,
-                                -- a progress ring fills, THEN the window explosively
-                                -- expands (the v5 Size-spring entrance + Trace lap).
-                                task.spawn(function()
-                                        pcall(function()
-                                                local steps = { "CHECKING FORMAT", "VERIFYING KEY", "AUTHORIZED" }
-                                                -- Build the step rows into the card.
-                                                local stepFrames = {}
-                                                for stepIndex, stepText in ipairs(steps) do
-                                                        local row = Instance.new("Frame")
-                                                        row.Name = "Step" .. stepIndex
-                                                        row.Size = UDim2.new(1, -48, 0, 16)
-                                                        row.Position = UDim2.new(0, 24, 0, 164 + (stepIndex - 1) * 18)
-                                                        row.BackgroundTransparency = 1
-                                                        row.ZIndex = 34
-                                                        row.Parent = card
-                                                        local chk = Instance.new("TextLabel")
-                                                        chk.Size = UDim2.new(0, 16, 1, 0)
-                                                        chk.BackgroundTransparency = 1
-                                                        chk.Font = Enum.Font.GothamBold
-                                                        chk.TextSize = 12
-                                                        chk.TextColor3 = C.accent
-                                                        chk.TextTransparency = 1
-                                                        chk.Text = "✓"
-                                                        chk.ZIndex = 35
-                                                        chk.Parent = row
-                                                        local st = Instance.new("TextLabel")
-                                                        st.Size = UDim2.new(1, -22, 1, 0)
-                                                        st.Position = UDim2.new(0, 20, 0, 0)
-                                                        st.BackgroundTransparency = 1
-                                                        st.Font = Enum.Font.GothamMedium
-                                                        st.TextSize = 10
-                                                        st.TextColor3 = C.textDim
-                                                        st.TextXAlignment = Enum.TextXAlignment.Left
-                                                        st.TextTransparency = 0.35
-                                                        st.Text = stepText
-                                                        st.ZIndex = 35
-                                                        st.Parent = row
-                                                        table.insert(stepFrames, { chk = chk, st = st })
-                                                end
-                                                -- Hide the old status text; steps take over.
-                                                status.TextTransparency = 1
-                                                -- Sequential glow-in with a soft tick per step.
-                                                for stepIndex, frameRow in ipairs(stepFrames) do
-                                                        task.wait(0.14)
-                                                        if not card.Parent then return end
-                                                        frameRow.chk.TextTransparency = 0
-                                                        frameRow.st.TextTransparency = 0
-                                                        Tween(frameRow.chk, MT.move, { TextTransparency = 0 })
-                                                        Tween(frameRow.st, MT.move, { TextTransparency = 0 })
-                                                        playSfx("Confirm", 1 + stepIndex * 0.12)
-                                                end
-                                                task.wait(0.18)
-                                        end)
-                                        pcall(function()
-                                                Tween(card, T20, { BackgroundTransparency = 1 })
-                                                Tween(cardStroke, T20, { Transparency = 1 })
-                                                Tween(cardGlow, T20, { BackgroundTransparency = 1 })
-                                                Tween(dim, T20, { BackgroundTransparency = 1 })
-                                                for _, child in ipairs(card:GetChildren()) do
-                                                        if child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton") then
-                                                                if child:IsA("TextLabel") or child:IsA("TextBox") then
-                                                                        Tween(child, T20, { TextTransparency = 1 })
-                                                                end
-                                                                Tween(child, T20, { BackgroundTransparency = 1 })
-                                                        end
-                                                end
-                                                task.wait(0.22)
-                                        end)
-                                        gateJanitor:Cleanup()
-                                        frame.Visible = true
-                                        setShadowVisible(true)
-                                        task.spawn(runEntrance)
-                                        if ks.SaveKey ~= false and matchedKey then
-                                                notify("Key System", "Your key has been saved for next time.", 4, "success")
-                                        end
-                                end)
+                -- BACKEND VALIDATION: custom fn -> static keys -> HTTP
+                -- endpoint. First accept wins; each stage can reject with
+                -- a reason that surfaces on the status line.
+                local function validateKey(key)
+                        if type(backend.Validate) == "function" then
+                                local ok, accepted, reason = pcall(backend.Validate, key)
+                                if not ok then return false, "Validator error" end
+                                if accepted == true then return true end
+                                if accepted == false then return false, reason or "Invalid key" end
                         end
-
-                        local locked = false
-                        local function tryKey()
-                                if gateResolved or locked then return end
-                                local entered = inputBox.Text
-                                if entered == "" then return end
-                                local matched = nil
-                                for _, k in ipairs(keyGateKeys) do
-                                        if entered == k then matched = k break end
-                                end
-                                if matched then
-                                        resolveGate(matched)
-                                else
-                                        -- [v5.0.0] ERROR TRACE: a wrong key runs the lap in red.
-                                        traceLap(C.red, 1)
-                                        inputBox.Text = ""
-                                        shakeCard()
-                                        Tween(inputStroke, T10, { Color = C.red, Thickness = 1.5 })
-                                        task.delay(0.6, function()
-                                                Tween(inputStroke, T10, { Color = C.border, Thickness = 1 })
-                                        end)
-                                        if attemptsMax > 0 then
-                                                attemptsLeft = attemptsLeft - 1
-                                                status.Text = "Attempts remaining: " .. math.max(attemptsLeft, 0)
-                                                status.TextColor3 = attemptsLeft <= 1 and C.red or C.yellow
-                                                if attemptsLeft <= 0 then
-                                                        local mode = tostring(ks.OnExhausted or "Lock")
-                                                        if mode == "Kick" then
-                                                                if player then player:Kick("No attempts remaining.") end
-                                                        elseif mode == "None" then
-                                                                attemptsLeft = attemptsMax
-                                                                status.Text = "Attempts remaining: " .. attemptsLeft
-                                                                status.TextColor3 = C.muted
-                                                        else
-                                                                locked = true
-                                                                inputBox.TextEditable = false
-                                                                inputBox.Text = ""
-                                                                inputBox.PlaceholderText = "Locked"
-                                                                submitLbl.Text = "Locked"
-                                                                status.Text = "No attempts remaining. Rejoin to try again."
-                                                                status.TextColor3 = C.red
-                                                        end
-                                                end
+                        for _, k in ipairs(staticKeys) do
+                                if key == k then return true end
+                        end
+                        if type(backend.Endpoint) == "string" and backend.Endpoint ~= "" then
+                                local req = netRequestFn()
+                                if not req then return false, "No HTTP support in this environment" end
+                                local method = backend.EndpointMethod or "POST"
+                                local headers = backend.EndpointHeaders or { ["Content-Type"] = "application/json" }
+                                local body = nil
+                                if method ~= "GET" then
+                                        if type(backend.EndpointBody) == "function" then
+                                                local okB, built = pcall(backend.EndpointBody, key, getHwid())
+                                                body = okB and built or nil
+                                        else
+                                                body = HttpService:JSONEncode({ key = key, hwid = getHwid() })
                                         end
                                 end
+                                local okReq, res = pcall(req, {
+                                        Url = backend.Endpoint, Method = method,
+                                        Headers = headers, Body = body,
+                                })
+                                if not okReq or type(res) ~= "table" then return false, "Backend unreachable" end
+                                if type(backend.EndpointParse) == "function" then
+                                        local okP, accepted, reason = pcall(backend.EndpointParse, res.Body, res)
+                                        if not okP then return false, "Bad backend response" end
+                                        return accepted == true, reason or "Invalid key"
+                                end
+                                local okD, data = pcall(function()
+                                        return HttpService:JSONDecode(tostring(res.Body))
+                                end)
+                                if okD and type(data) == "table" then
+                                        return (data.success == true or data.valid == true or data.ok == true),
+                                                data.reason or data.message
+                                end
+                                return false, "Invalid key"
                         end
+                        if #staticKeys == 0 then return false, "No validation backend configured" end
+                        return false, "Invalid key"
+                end
 
-                        submit.Activated:Connect(tryKey)
-                        inputBox.FocusLost:Connect(function(enterPressed)
-                                if enterPressed then tryKey() end
-                        end)
-                        submit.MouseEnter:Connect(function()
-                                Tween(submit, T10, { BackgroundColor3 = C.accentDim })
-                        end)
-                        submit.MouseLeave:Connect(function()
-                                Tween(submit, T10, { BackgroundColor3 = C.accentDark })
-                        end)
-                        task.defer(function()
-                                if inputBox.Parent and inputBox.Visible then inputBox:CaptureFocus() end
-                        end)
-                        onTheme(function()
-                                if card.Parent then
-                                        Tween(card, T20, { BackgroundColor3 = C.bg })
-                                        Tween(cardStroke, T20, { Color = C.borderAcc })
-                                        Tween(cardGlow, T20, { BackgroundColor3 = C.accent })
-                                        Tween(title, T20, { TextColor3 = C.text })
-                                        Tween(gateSubtitle, T20, { TextColor3 = C.muted })
-                                        Tween(note, T20, { TextColor3 = C.textDim })
-                                        Tween(inputBox, T20, { BackgroundColor3 = C.panelAlt })
-                                        Tween(submit, T20, { BackgroundColor3 = C.accentDark })
-                                        Tween(submitStroke, T20, { Color = C.accentDim })
-                                        Tween(submitLbl, T20, { TextColor3 = C.accentHi })
-                                        submitGrad.Color = ColorSequence.new{
-                                                ColorSequenceKeypoint.new(0.0, C.accentDim),
-                                                ColorSequenceKeypoint.new(1.0, C.accentDark),
-                                        }
+                local function resolveGate(matchedKey)
+                        if gateResolved then return end
+                        gateResolved = true
+                        if ks.SaveKey ~= false and matchedKey and FS.available then
+                                FS.ensureFolder("RezurXLib/Keys")
+                                local payload = {
+                                        Key = matchedKey,
+                                        Hwid = hwidLock and getHwid() or nil,
+                                        SavedAt = os.time(),
+                                }
+                                local okEnc, json = pcall(function() return HttpService:JSONEncode(payload) end)
+                                if okEnc and type(json) == "string" then FS.write(keyFile, json) end
+                        end
+                        -- [v5.1.0] STEP UNLOCK SEQUENCE: verification steps
+                        -- light up with drawn check glyphs one by one, then
+                        -- the window explosively expands (entrance + Trace).
+                        task.spawn(function()
+                                pcall(function()
+                                        local steps = { "CHECKING FORMAT", "VERIFYING KEY", "AUTHORIZED" }
+                                        local stepFrames = {}
+                                        for stepIndex, stepText in ipairs(steps) do
+                                                local row = Instance.new("Frame")
+                                                row.Name = "Step" .. stepIndex
+                                                row.Size = UDim2.new(1, -48, 0, 16)
+                                                row.Position = UDim2.new(0, 24, 0, submitY + 44 + (stepIndex - 1) * 18)
+                                                row.BackgroundTransparency = 1
+                                                row.ZIndex = 34
+                                                row.Parent = card
+                                                -- [v5.7.1] Drawn check glyph (was a "✓"
+                                                -- text glyph — font-dependent).
+                                                local chk = makeIcon(row, "check", 12, C.accent, { z = 35 })
+                                                chk.Position = UDim2.new(0, 8, 0.5, 0)
+                                                chk.Visible = false
+                                                local st = Instance.new("TextLabel")
+                                                st.Size = UDim2.new(1, -22, 1, 0)
+                                                st.Position = UDim2.new(0, 20, 0, 0)
+                                                st.BackgroundTransparency = 1
+                                                st.Font = Enum.Font.GothamMedium
+                                                st.TextSize = 10
+                                                st.TextColor3 = C.textDim
+                                                st.TextXAlignment = Enum.TextXAlignment.Left
+                                                st.TextTransparency = 0.35
+                                                st.Text = stepText
+                                                st.ZIndex = 35
+                                                st.Parent = row
+                                                table.insert(stepFrames, { chk = chk, st = st })
+                                        end
+                                        status.TextTransparency = 1
+                                        for stepIndex, frameRow in ipairs(stepFrames) do
+                                                task.wait(0.14)
+                                                if not card.Parent then return end
+                                                frameRow.chk.Visible = true
+                                                frameRow.st.TextTransparency = 0
+                                                Tween(frameRow.st, MT.move, { TextTransparency = 0 })
+                                                playSfx("Confirm", 1 + stepIndex * 0.12)
+                                        end
+                                        task.wait(0.18)
+                                end)
+                                pcall(function()
+                                        Tween(card, T20, { BackgroundTransparency = 1 })
+                                        Tween(cardStroke, T20, { Transparency = 1 })
+                                        Tween(cardGlow, T20, { BackgroundTransparency = 1 })
+                                        Tween(dim, T20, { BackgroundTransparency = 1 })
+                                        for _, child in ipairs(card:GetChildren()) do
+                                                if child:IsA("TextLabel") or child:IsA("TextBox") or child:IsA("TextButton") then
+                                                        if child:IsA("TextLabel") or child:IsA("TextBox") then
+                                                                Tween(child, T20, { TextTransparency = 1 })
+                                                        end
+                                                        Tween(child, T20, { BackgroundTransparency = 1 })
+                                                end
+                                        end
+                                        task.wait(0.22)
+                                end)
+                                gateJanitor:Cleanup()
+                                frame.Visible = true
+                                setShadowVisible(true)
+                                task.spawn(runEntrance)
+                                -- [v5.7.0] Non-theme backdrops fade their
+                                -- surfaces in alongside the entrance.
+                                if type(ctx.backdrop) == "table" then
+                                        pcall(function() ctx.backdrop:reveal() end)
+                                end
+                                if ks.SaveKey ~= false and matchedKey then
+                                        notify("Key System", "Key accepted and saved for next time.", 4, "success")
                                 end
                         end)
                 end
+
+                local function failGate(reason)
+                        traceLap(C.red, 1)
+                        inputBox.Text = ""
+                        shakeCard()
+                        Tween(inputStroke, T10, { Color = C.red, Thickness = 1.5 })
+                        task.delay(0.6, function()
+                                Tween(inputStroke, T10, { Color = C.border, Thickness = 1 })
+                        end)
+                        if attemptsMax > 0 then
+                                attemptsLeft = attemptsLeft - 1
+                                if attemptsLeft <= 0 then
+                                        local mode = tostring(ks.OnExhausted or "Lock")
+                                        if mode == "Kick" then
+                                                if player then player:Kick("No attempts remaining.") end
+                                        elseif mode == "None" then
+                                                attemptsLeft = attemptsMax
+                                                setStatus("Attempts remaining: " .. attemptsLeft, C.muted)
+                                        else
+                                                locked = true
+                                                inputBox.TextEditable = false
+                                                submitLbl.Text = "Locked"
+                                                setStatus("No attempts remaining. Rejoin to try again.", C.red)
+                                        end
+                                        return
+                                end
+                                setStatus((reason or "Invalid key") .. " — attempts left: " .. math.max(attemptsLeft, 0), C.yellow)
+                        else
+                                setStatus(reason or "Invalid key", C.yellow)
+                        end
+                end
+
+                local function trim(s)
+                        return (s:gsub("^%s+", ""):gsub("%s+$", ""))
+                end
+
+                local function tryKey()
+                        if gateResolved or locked or busy then return end
+                        local entered = trim(inputBox.Text)
+                        if entered == "" then
+                                setStatus("Enter your key first.", C.yellow)
+                                shakeCard()
+                                return
+                        end
+                        if requireVisit and visitCount == 0 then
+                                setStatus("Copy a provider link first.", C.yellow)
+                                shakeCard()
+                                return
+                        end
+                        busy = true
+                        submitLbl.Text = "Checking…"
+                        setStatus("Contacting backend…", C.muted)
+                        task.spawn(function()
+                                local ok, reason = validateKey(entered)
+                                busy = false
+                                if gateResolved or locked or not submitLbl.Parent then return end
+                                if ok then
+                                        resolveGate(entered)
+                                else
+                                        submitLbl.Text = "Redeem Key"
+                                        failGate(reason)
+                                end
+                        end)
+                end
+
+                submit.Activated:Connect(tryKey)
+                inputBox.FocusLost:Connect(function(enterPressed)
+                        if enterPressed then tryKey() end
+                end)
+                submit.MouseEnter:Connect(function()
+                        Tween(submit, T10, { BackgroundColor3 = C.accentDim })
+                end)
+                submit.MouseLeave:Connect(function()
+                        Tween(submit, T10, { BackgroundColor3 = C.accentDark })
+                end)
+                task.defer(function()
+                        if inputBox.Parent and inputBox.Visible then inputBox:CaptureFocus() end
+                end)
+                onTheme(function()
+                        if card.Parent then
+                                Tween(card, T20, { BackgroundColor3 = C.bg })
+                                Tween(cardStroke, T20, { Color = C.borderAcc })
+                                Tween(cardGlow, T20, { BackgroundColor3 = C.accent })
+                                Tween(title, T20, { TextColor3 = C.text })
+                                Tween(gateSubtitle, T20, { TextColor3 = C.muted })
+                                Tween(note, T20, { TextColor3 = C.textDim })
+                                Tween(inputBox, T20, { BackgroundColor3 = C.panelAlt })
+                                Tween(submit, T20, { BackgroundColor3 = C.accentDark })
+                                Tween(submitStroke, T20, { Color = C.accentDim })
+                                Tween(submitLbl, T20, { TextColor3 = C.accentHi })
+                                submitGrad.Color = ColorSequence.new{
+                                        ColorSequenceKeypoint.new(0.0, C.accentDim),
+                                        ColorSequenceKeypoint.new(1.0, C.accentDark),
+                                }
+                        end
+                end)
         end
+
+        buildKeyGate({
+                keyGatePending = keyGatePending,
+                keySettingsRef = keySettingsRef,
+                keyGateKeys = keyGateKeys,
+                frame = frame, overlayGui = overlayGui, C = C, R = R,
+                WindowJanitor = WindowJanitor, FS = FS, Janitor = Janitor,
+                corner = corner, stroke = stroke, pad = pad,
+                gradient = gradient, concentric = concentric,
+                Tween = Tween, T10 = T10, T20 = T20, MT = MT,
+                traceLap = traceLap, playSfx = playSfx, notify = notify,
+                runEntrance = runEntrance, setShadowVisible = setShadowVisible,
+                player = player, onTheme = onTheme, windowName = windowName,
+                backdrop = backdrop,
+        })
 
         table.insert(Library._windows, Window)
         Library._lastWindow = Window

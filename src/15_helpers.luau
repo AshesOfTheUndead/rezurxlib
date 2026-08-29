@@ -38,6 +38,21 @@ local function keyName(keyCode)
         return n
 end
 
+-- [v5.7.0] SHORT KEY LABELS: the footer's toggle-key badge and keybind
+-- pills stay narrow on compact layouts — LeftControl renders as LCTRL,
+-- RightShift as RSHIFT, and so on. Unknown keys fall back to their
+-- upper-cased Name.
+local KEY_SHORT = {
+        LeftControl = "LCTRL", RightControl = "RCTRL",
+        LeftShift = "LSHIFT", RightShift = "RSHIFT",
+        LeftAlt = "LALT", RightAlt = "RALT",
+        LeftMeta = "META", RightMeta = "META",
+}
+local function shortKey(keyCode)
+        if keyCode == nil then return "None" end
+        return KEY_SHORT[keyCode.Name] or string.upper(keyCode.Name)
+end
+
 -- ============================================================
 -- TRUST + GUI HOSTING
 -- ============================================================
@@ -58,6 +73,8 @@ local TrustManifest = {
         CoreGuiOptIn = true,
         CoreGuiFallback = "PlayerGui",
         Configuration = "Memory only; developers own persistence.",
+        IconSystem = "image-first, drawn vector fallback, no remote atlas",
+        NetImages = "URL downloads only for explicitly supplied URLs; cached in RezurXLib/NetCache.",
 }
 
 local function isGuiHost(instance)
@@ -366,7 +383,7 @@ end
 
 local Library = {}
 Library.Flags = {}          -- flag -> element object (has CurrentValue / CurrentOption / etc.)
-Library.Version = "5.6.0"
+Library.Version = "5.7.1"
 Library._windows = {}
 Library.Options = { ReducedMotion = false }
 

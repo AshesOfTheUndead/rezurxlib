@@ -1,5 +1,89 @@
 # Changelog
 
+## v5.7.1 — "Aurora" hotfix + advanced key system
+
+Built on the uncommitted v5.7.0 "Aurora" working tree (icon engine,
+backdrops, throw physics, horizontal tab strip), this release makes that
+tree actually compile, then lands the full audit fix list and the
+advanced key system.
+
+**Critical fixes:**
+- **The bundle did not compile.** Luau's 200-local register ceiling was
+  exceeded inside CreateWindow (the old inline key-gate do-block was the
+  straw). The gate now lives in its own ctx-packed `buildKeyGate(ctx)`
+  function — CreateWindow drops ~25 locals and the bundle compiles clean.
+- **`glowStrip` was an accidental global** (the forward local went
+  missing in the v5.7.0 refactor): two windows shared one header glow
+  strip and hiding one window toggled the other's. Now a proper local.
+- **Hold-style keybinds read `kbSurf` as a nil global** on release — the
+  local lived only inside the InputBegan closure. The release path now
+  builds its own SafeCallback surface (fresh theme colors per event).
+
+**Advanced key system (replaces the stock gate):**
+- **Providers**: up to 4 link providers rendered as a 2x2 grid on the
+  gate card. Tapping copies the link (executor `setclipboard` when
+  present) and flips the row to a check. `RequireProviderVisit = true`
+  refuses redemption until at least one provider link was copied.
+- **Pluggable backends** — validation chain at redeem time:
+  1. `Backend.Validate = function(key) return ok, reason end` (custom)
+  2. static key whitelist (`Key` / `Backend.Keys`, incl. legacy
+     `GrabKeyFromSite` fetches)
+  3. `Backend.Endpoint` — HTTP backend via the executor's `request`
+     (custom `EndpointMethod` / `EndpointHeaders` / `EndpointBody` /
+     `EndpointParse`; default POSTs `{key, hwid}` JSON and accepts
+     `valid`/`success`/`ok` replies)
+- **HWID binding**: `Backend.HwidLock = true` stores `{Key, Hwid,
+  SavedAt}` as JSON; the boot pre-check auto-passes only when the device
+  matches. A tap-to-copy HWID chip renders on the card while locked.
+- **Async redeem**: validation runs in `task.spawn` with a "Checking…"
+  busy state; the card can never freeze mid-check. Legacy raw-string
+  saves still auto-pass (the reader understands both formats).
+- Honest note preserved from the design: everything client-side is
+  bypassable by a determined executor user — the Endpoint backend is the
+  real gate; keep the unlock decision server-side.
+
+**Audit fixes (F1-F15):**
+- Chat-safe input gate: `inputBusy()` (drag / rebind / focused textbox)
+  now backs the toggle key, Keybind, AND Bindable listeners — bindings no
+  longer misfire while the user is typing in chat or any input field.
+- Dropdown chevron keeps its center anchor (rotations spin in place, the
+  glyph stays centered); dropdown selected-checks and key-gate step
+  checks are drawn vector glyphs, not font-dependent "✓" text.
+- Content edge fades (top 14px / bottom 18px) — cards no longer
+  hard-clip at the scroll bounds; covered by new suite checks.
+- Restore ball hover: accent halo ring + face brighten (was the last
+  control without hover treatment).
+- Command palette results render the tab's own icon next to the name.
+- Duplicate `logo.TextStrokeTransparency` assignment removed.
+- (F1/F3/F4/F5/F11/F14 — motes scope, https icon URIs, center anchors,
+  net-image fallback path, content fades, aurora pulse wiring — were
+  already present in the working tree and are now verified by tests.)
+
+**Tests:** 318 passed, 0 failed (was 287 at v5.6.0). New: TEST 32
+(22 checks) covering the provider grid cap + card growth, the
+RequireProviderVisit refusal, custom-validator unlock, HTTP endpoint
+denial reason + unlock + POST body shape, the HWID chip, the JSON save
+envelope, same-HWID reboot skip, and different-HWID re-gate. Geometry
+tests rewritten for the v5.7.0 horizontal tab strip; mock updated with
+StarterGui/ContentProvider services.
+
+## v5.7.0 — "Aurora" (uncommitted working tree, finalized in 5.7.1)
+
+- Image-first icon engine with drawn-vector fallback: asset ids, rbx
+  asset/rbxthumb/http URIs, `Library:RegisterIcon` names, and a built-in
+  24x24 vector glyph table — zero assets and zero requests for the
+  default icon set. HTTP icons stream through the NetImage pipeline
+  (executor filesystem cache + `getcustomasset`) with a breathing glyph
+  fallback while loading.
+- Customizable window backdrop: `Backdrop = { Mode = "theme"|"image"|
+  "gradient"|"aurora", ... }` with parallax on drag, settle on release,
+  reveal on entrance, and a blob pulse on every tab switch.
+- Throw physics + edge snap on the window drag.
+- Horizontal top tab strip (38px, X-scrolling, measured-width chips)
+  replacing the v5.6 sidebar rail; content edge fades; R.outer 16 -> 20.
+- Universal task shim + environment probe (studio/executor/client) and
+  a re-run guard handing back an already-exported identical Library.
+
 ## v5.6.0 — "Magma Cross": visual hybrid of Maclib + Rayfield Gen 2
 
 A deep visual port that crosses the Maclib macOS sidebar-window idiom

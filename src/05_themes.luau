@@ -337,6 +337,10 @@ local _tweens = setmetatable({}, { __mode = "k" })
 
 -- Per-window motion preferences are stored on the window's ScreenGui. This
 -- keeps separate RezurX windows independent when one needs reduced motion.
+-- [v5.7.0] RezurXAutoMotionScale (published by the frame-time guard) now
+-- CAPS the effective scale: the attribute used to be set but never read,
+-- so slow-host degradation silently did nothing. User-configured
+-- MotionScale and the auto cap compose via min().
 local function motionScaleFor(inst)
         local cursor = inst
         while cursor and typeof(cursor) == "Instance" do
@@ -344,6 +348,10 @@ local function motionScaleFor(inst)
                         if cursor:GetAttribute("RezurXReducedMotion") then return 0 end
                         local scale = cursor:GetAttribute("RezurXMotionScale")
                         if type(scale) == "number" then
+                                local auto = cursor:GetAttribute("RezurXAutoMotionScale")
+                                if type(auto) == "number" then
+                                        return math.clamp(math.min(scale, auto), 0.05, 3)
+                                end
                                 return math.clamp(scale, 0.05, 3)
                         end
                         return 1

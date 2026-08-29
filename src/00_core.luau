@@ -1,9 +1,18 @@
 -- ============================================================
--- RezurXLib v5.6.0 "Magma Cross" - self-contained Roblox UI library
+-- RezurXLib v5.7.1 "Aurora" - self-contained Roblox UI library
 --
 -- Glass + Glow edition: layered depth shadows, a subtle accent rim,
 -- spring entrance, staggered tab openings, icon support, an optional
 -- key gate, and signature-diffed auto-saving configuration files.
+-- [v5.7.0 AURORA] image-first icon engine with drawn-vector fallback,
+-- customizable window backdrop (theme/image/gradient/aurora), a net-image
+-- URL pipeline for explicitly supplied URLs, input coexistence, throw
+-- physics + edge snap on the window drag, and a horizontal tab bar.
+-- [v5.7.1] advanced key system (providers / custom validator / HTTP
+-- endpoint backends / HWID binding), inputBusy() chat gate on every
+-- global key listener, vector check glyphs everywhere, content edge
+-- fades, restore-ball hover, palette result icons — plus the
+-- CreateWindow register-overflow compile fix (gate → own function).
 --
 -- Original implementation with tokenized themes, pointer-owned input,
 -- popup ownership, callback isolation, and no package dependency.
@@ -43,6 +52,56 @@ local TextService      = game:GetService("TextService")
 local HttpService      = game:GetService("HttpService")
 local SoundService     = game:GetService("SoundService")
 local Lighting         = game:GetService("Lighting")
+local StarterGui       = game:GetService("StarterGui")
+local ContentProvider  = game:GetService("ContentProvider")
+
+-- [v5.7.0] Re-run guard: executors that re-execute a loadstring bootstrap
+-- used to build a second Library (and a second window) on top of the first.
+-- When an identical version is already exported, hand it straight back.
+if type(_G) == "table" and _G.RezurXLib and _G.RezurXLib.Version == "5.7.1" then
+        return _G.RezurXLib
+end
+
+-- [v5.7.0] UNIVERSAL TASK SHIM: a few older executor sandboxes still ship
+-- without the `task` scheduler. The library leans on task.spawn/delay/wait
+-- for isolation, so shim the missing pieces over coroutine+wait primitives
+-- instead of crashing at load. Real task tables pass through untouched.
+if type(task) ~= "table" then
+        task = {
+                wait = function(s)
+                        if s then return wait(s) end
+                        return wait()
+                end,
+                spawn = function(fn)
+                        local c = coroutine.create(fn)
+                        coroutine.resume(c)
+                        return c
+                end,
+                defer = function(fn)
+                        return coroutine.resume(coroutine.create(fn))
+                end,
+                delay = function(s, fn)
+                        return delay(s, function() fn() end)
+                end,
+                cancel = function(c)
+                        pcall(function() coroutine.close(c) end)
+                end,
+        }
+end
+
+-- [v5.7.0] UNIVERSAL ENVIRONMENT PROBE: one pcall-guarded snapshot of
+-- where we are running (studio / executor / plain client) plus whether
+-- CoreGui is addressable here. Host resolution reads this instead of
+-- re-probing per window.
+local Env = { IsStudio = false, HasCoreGui = false, Runtime = "client" }
+do
+        local ok, studio = pcall(function() return RunService:IsStudio() end)
+        Env.IsStudio = ok and studio == true
+        local okCore, isLayer = pcall(function() return CoreGui:IsA("LayerCollector") end)
+        Env.HasCoreGui = okCore and isLayer or false
+        Env.Runtime = Env.IsStudio and "studio"
+                or (type(writefile) == "function" and "executor" or "client")
+end
 
 -- [v5.3.1] NON-YIELDING PLAYER RESOLUTION. The previous pattern
 -- (player:WaitForChild("PlayerGui")) at module top yielded the entire
@@ -68,7 +127,7 @@ end
 -- when the same script is attached to multiple windows.
 pcall(function()
         if RunService and not RunService:IsStudio() then
-                print(("[RezurXLib] v5.6.0 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
+                print(("[RezurXLib] v5.7.1 module loaded. LocalPlayer=%s PlayerGui=%s"):format(
                         tostring(player),
                         tostring(playerGui and playerGui.Name or "pending")
                 ))
@@ -114,11 +173,11 @@ local TTOGGLEBG = MT.settle
 -- SHARED CORNER RADII
 -- ============================================================
 local R = {
-        outer  = 16,  -- window shell (v5.5.0: Rayfield 20 × Maclib 10 cross)
+        outer  = 20,  -- window shell (v5.7.0 Aurora: the fuller 20px Rayfield curve)
         panel  = 12,  -- cards / popups
         control = 10, -- buttons / inputs
         small  = 8,   -- chips / icon tiles
-        tab    = 10,  -- legacy tab chip radius (v5.5.0: live chips use PILL)
+        tab    = 10,  -- tab chip radius (v5.7.0 top tab bar)
 }
 -- PILLS are height-relative: always UDim.new(0.5, 0). Never a fixed
 -- offset that fights the element height.

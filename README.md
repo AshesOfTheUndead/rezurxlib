@@ -1,8 +1,10 @@
 # 👑 RezurXLib
 
-**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.6.0 "Magma Cross".
+**A single-file Roblox Luau UI library.** Premium visuals, every component you need, runs in executors and Studio. v5.7.1 "Aurora".
 
-> **Visual language attribution:** v5.6.0 is a remade visual cross of [Maclib](https://github.com/.../maclib) (MIT) and [Rayfield Gen 2](https://github.com/SiriusSoftwareLtd/rayfield-gen2) (MIT). The traffic-light window controls, the sidebar header card + footer profile chip, the rail discipline, and the chip measurement language are visual ports of those libraries' published UI idioms, re-implemented in fresh Luau inside RezurXLib's API surface and themed with the RezurX lava palette. Both source libraries are MIT-licensed and their attribution is preserved here; this codebase contains no verbatim source from either library — every line is original RezurXLib Luau implementing the hybrid visual spec.
+> **Visual language attribution:** the chrome lineage crosses [Maclib](https://github.com/.../maclib) (MIT) and [Rayfield Gen 2](https://github.com/SiriusSoftwareLtd/rayfield-gen2) (MIT) idioms — the traffic-light window controls and the chip-measurement language are visual ports of their published UI idioms; v5.7 "Aurora" re-bases the window on a horizontal top tab strip with an image-first icon engine. Both references are MIT-licensed; every line here is original RezurXLib Luau implementing the visual spec — no verbatim source from either library.
+
+> **v5.7 "Aurora" highlights:** image-first icon engine with drawn-vector fallback (asset ids / URIs / http URLs / named glyphs, zero assets required) · customizable window backdrops (theme / image / gradient / aurora blobs) · net-image URL pipeline with executor filesystem cache · throw physics + edge snap on drag · input coexistence gate · **v5.7.1 advanced key system**: link providers (2x2 grid, capped 4), pluggable validation backends (static keys / custom function / HTTP endpoint), optional HWID binding, async redeem with busy state — plus a chat-safe input gate on every global key listener, vector check glyphs, content edge fades, restore-ball hover, and a CreateWindow register-overflow compile fix.
 
 ```lua
 local RezurXLib = loadstring(game:HttpGet(
@@ -218,17 +220,41 @@ KeySystem = true,
 KeySettings = {
     Title    = "My Hub",
     Subtitle = "Key System",
-    Note     = "Get a key from our Discord.",
+    Note     = "Pick a provider, complete it, then redeem your key below.",
     FileName = "MyHubKey",       -- saved under RezurXLib/Keys/
-    SaveKey  = true,             -- remember accepted keys (exact-match)
+    SaveKey  = true,             -- remember accepted keys (JSON envelope)
     GrabKeyFromSite = false,     -- or a raw URL to fetch the key
-    Key      = { "KEY-1", "KEY-2" },  -- string or list
+    Key      = { "KEY-1", "KEY-2" },  -- string or list (legacy whitelist)
+    RequireProviderVisit = false, -- true = must copy a provider link first
+
+    Providers = {                -- up to 4, rendered as a 2x2 grid
+        { Name = "Loot Labs",   Url = "https://lootlabs.gg/your-link" },
+        { Name = "Linkvertise", Url = "https://linkvertise.com/your-link" },
+    },
+
+    Backend = {
+        Keys = { "STATIC-KEY-1" },                 -- static whitelist
+        -- Validate = function(key) return key == "secret", "bad key" end,
+        Endpoint = "https://your.api/validate",    -- HTTP backend
+        EndpointMethod = "POST",
+        -- EndpointBody = function(key, hwid) ... end,
+        -- EndpointParse = function(body, res) ... end,
+        HwidLock = true,                          -- bind the key to this device
+    },
+
     MaxAttempts = 5,             -- 0 = unlimited
     OnExhausted = "Lock",        -- "Lock" | "Kick" | "None"
 },
 ```
 
-A styled unlock card in the library's own design language (no external asset download). Elastic shake on wrong keys, attempt counter, saved-key skip, configurable exhaustion policy. The entrance animation defers until the gate passes.
+A styled unlock card in the library's own design language (no external asset download). v5.7.1 turns the gate into a full funnel:
+
+- **Providers** (max 4, 2x2 grid): tapping a provider copies its link and flips the row to a check. With `RequireProviderVisit = true`, redemption is refused until at least one link was copied.
+- **Pluggable validation** — the redeem runs the chain *custom `Validate` function -> static `Keys` -> HTTP `Endpoint`* (first accept wins) asynchronously with a "Checking…" busy state, so the card never freezes. The endpoint path POSTs `{ key, hwid }` JSON by default and accepts `valid` / `success` / `ok` replies; override everything with `EndpointMethod` / `EndpointHeaders` / `EndpointBody` / `EndpointParse`.
+- **HWID binding**: with `HwidLock = true`, accepted keys are saved as `{ Key, Hwid, SavedAt }` and the boot pre-check auto-passes only on the same device (a tap-to-copy HWID chip renders on the card). Legacy raw-string saves from older versions still auto-pass.
+- Elastic shake on wrong keys (with the backend's own failure reason on the status line), attempt counter, saved-key skip, Lock/Kick/None exhaustion. The entrance animation defers until the gate passes.
+
+> **Honest note:** everything client-side is bypassable by a determined executor user. The `Endpoint` backend is your real gate — keep the actual unlock decision (and anything valuable) server-side, and treat the key gate as a funnel, not a wall.
 
 ---
 
@@ -257,11 +283,11 @@ A styled unlock card in the library's own design language (no external asset dow
 ## Trust & reliability
 
 - **No telemetry.** Zero analytics, zero data collection.
-- **No automatic requests.** The only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, `ConfigurationSaving`).
+- **No automatic requests.** The only network/file operations are the ones you explicitly configure (`KeySettings.GrabKeyFromSite`, the key-gate `Backend.Endpoint`, URL-valued icons/backdrops, `ConfigurationSaving`).
 - **No executor bypass globals** except `gethui()` (off in plain Roblox).
 - **Error-handled.** Every callback wrapped in `pcall`. Every motion path degrades gracefully on slow hosts (frame-time guard, 12-spring budget cap, `ReducedMotion` honored).
 - **Memory-safe.** Janitor pattern, flag pruning on element destroy, drag sessions can never outlive their owner.
-- **Headless-tested.** 236 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows, animation end-states, FPS-throttle verification).
+- **Headless-tested.** 318 integration tests run the entire library against a mocked Roblox API (window creation, every element, drag & touch simulation, config save/load, key gate flows incl. providers/endpoint/HWID, animation end-states, FPS-throttle verification).
 - **Executor-compatible.** Synapse, Krnl, Script-Ware, Xeno, Delta, and more.
 - **100% backward compatible.** Existing v3/v4 scripts run unchanged; v5 features are strictly additive.
 
